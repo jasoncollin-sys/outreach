@@ -17,3 +17,16 @@ export const dummyAgents = [
   { id: 'DA-14', firstName: 'Harvey', lastName: 'Notreal', role: 'Agent', agency: 'Fictional Talent Group', agencySize: 'Large', genres: ['Drama', 'Sci-Fi'], acceptsUnsolicited: 'No', submissionPolicy: 'Referral only.', notableClients: ['(placeholder client)'], verified: false },
   { id: 'DA-15', firstName: 'Zara', lastName: 'Prototype', role: 'Manager', agency: 'Sample Management', agencySize: 'Boutique', genres: ['Crime', 'Drama', 'Thriller'], acceptsUnsolicited: 'Yes', submissionPolicy: 'Query letter with one-paragraph synopsis.', notableClients: ['(placeholder client)'], verified: false },
 ]
+
+// Script editors and production companies — also fictional placeholders.
+export const dummyEditors = [
+  { id: 'DE-01', firstName: 'Iris', lastName: 'Notewell', role: 'Script editor', agency: 'Redline Coverage (demo)', agencySize: 'Boutique', genres: ['Crime', 'Drama', 'Thriller'], acceptsUnsolicited: 'Yes', submissionPolicy: 'Feature notes from £150; 10-day turnaround.', notableClients: ['(placeholder credit)'], verified: false },
+  { id: 'DE-02', firstName: 'Duncan', lastName: 'Margins', role: 'Script editor', agency: 'Placeholder Pages (demo)', agencySize: 'Boutique', genres: ['Comedy', 'Drama'], acceptsUnsolicited: 'Yes', submissionPolicy: 'Page notes plus development call.', notableClients: ['(placeholder credit)'], verified: false },
+  { id: 'DE-03', firstName: 'Sylvie', lastName: 'Draftsdóttir', role: 'Script editor', agency: 'Example Editorial (demo)', agencySize: 'Boutique', genres: ['Horror', 'Sci-Fi', 'Thriller'], acceptsUnsolicited: 'Yes', submissionPolicy: 'Genre specialist; blind coverage available.', notableClients: ['(placeholder credit)'], verified: false },
+]
+
+export const dummyProdcos = [
+  { id: 'DP-01', firstName: '', lastName: '', role: 'Production company', agency: 'Specimen Pictures (demo)', agencySize: 'Mid', genres: ['Crime', 'Drama'], acceptsUnsolicited: 'No', submissionPolicy: 'Submissions via agents only.', notableClients: ['(placeholder title)'], verified: false },
+  { id: 'DP-02', firstName: '', lastName: '', role: 'Production company', agency: 'Demo Films Ltd (demo)', agencySize: 'Boutique', genres: ['Thriller', 'Horror'], acceptsUnsolicited: 'Query letter first', submissionPolicy: 'Open to queries during announced windows.', notableClients: ['(placeholder title)'], verified: false },
+  { id: 'DP-03', firstName: '', lastName: '', role: 'Production company', agency: 'Placeholder Productions (demo)', agencySize: 'Large', genres: ['Drama', 'Sci-Fi'], acceptsUnsolicited: 'No', submissionPolicy: 'Development slate via reps and labs.', notableClients: ['(placeholder title)'], verified: false },
+]

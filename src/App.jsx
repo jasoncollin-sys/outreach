@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react'
-import { dummyAgents } from './data/dummyAgents.js'
+import { dummyAgents, dummyEditors, dummyProdcos } from './data/dummyAgents.js'
+
+const directory = [...dummyAgents, ...dummyEditors, ...dummyProdcos]
+const TYPES = ['All', 'Agent', 'Manager', 'Script editor', 'Production company']
 
 // ---------- helpers ----------
 const load = (key, fallback) => {
@@ -57,7 +60,7 @@ function Empty({ children }) {
 // ---------- screens ----------
 function Home({ go }) {
   const steps = [
-    ['01', 'Ready the script', 'Feedback and script services — coming after V1.'],
+    ['01', 'Ready the script', 'Script editors in the directory. Blind coverage — coming later.'],
     ['02', 'Prove it', 'Competitions matched to your script — coming soon.'],
     ['03', 'Get represented', 'Verified UK managers and agents. Start here.'],
     ['04', 'Run the campaign', 'Tiered targets, drafted queries, tracked responses.'],
@@ -96,7 +99,7 @@ function Agents({ scripts }) {
   const [openOnly, setOpenOnly] = useState(false)
   const [selected, setSelected] = useState(null)
 
-  const list = dummyAgents.filter((a) => {
+  const list = directory.filter((a) => {
     const text = `${a.firstName} ${a.lastName} ${a.agency}`.toLowerCase()
     if (q && !text.includes(q.toLowerCase())) return false
     if (role !== 'All' && a.role !== role) return false
@@ -106,8 +109,8 @@ function Agents({ scripts }) {
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-10">
-      <Slug scene="AGENT DATABASE" />
-      <h2 className="text-3xl font-semibold text-body mb-1">{dummyAgents.length} agents and managers</h2>
+      <Slug scene="THE DIRECTORY" />
+      <h2 className="text-3xl font-semibold text-body mb-1">{directory.length} listings across the industry</h2>
       <p className="text-dim text-sm mb-8">
         Demo records only. The real database is hand-verified against each agency's own website, with a source
         and last-checked date on every record.
@@ -121,9 +124,9 @@ function Agents({ scripts }) {
           className="flex-1 px-4 py-2.5 bg-panel text-body rounded-lg border border-edge focus:border-accent outline-none placeholder:text-dim/60"
         />
         <select value={role} onChange={(e) => setRole(e.target.value)} className="px-3 py-2.5 bg-panel text-body rounded-lg border border-edge outline-none">
-          <option>All</option>
-          <option>Agent</option>
-          <option>Manager</option>
+          {TYPES.map((t) => (
+            <option key={t} value={t}>{t === 'All' ? 'All types' : t + 's'}</option>
+          ))}
         </select>
         <label className="flex items-center gap-2 text-dim text-sm px-2 cursor-pointer select-none">
           <input type="checkbox" checked={openOnly} onChange={(e) => setOpenOnly(e.target.checked)} className="accent-[#F2620F]" />
@@ -141,8 +144,8 @@ function Agents({ scripts }) {
           >
             <div>
               <p className="text-body font-medium">
-                {a.firstName} {a.lastName}
-                <span className="text-dim font-normal"> · {a.agency}</span>
+                {a.firstName ? `${a.firstName} ${a.lastName}` : a.agency}
+                {a.firstName && <span className="text-dim font-normal"> · {a.agency}</span>}
               </p>
               <p className="text-dim text-sm mt-0.5">
                 {a.role} · {a.agencySize} · {a.genres.join(', ')}
@@ -168,9 +171,9 @@ function Agents({ scripts }) {
               <div>
                 <p className="font-slug text-xs text-accent tracking-widest uppercase mb-1">Character profile</p>
                 <h3 className="text-2xl font-semibold text-body">
-                  {selected.firstName} {selected.lastName}
+                  {selected.firstName ? `${selected.firstName} ${selected.lastName}` : selected.agency}
                 </h3>
-                <p className="text-dim">{selected.agency} · {selected.role}</p>
+                <p className="text-dim">{selected.firstName ? `${selected.agency} · ` : ''}{selected.role}</p>
               </div>
               <button onClick={() => setSelected(null)} className="text-dim hover:text-body text-xl leading-none">✕</button>
             </div>
@@ -446,7 +449,7 @@ export default function App() {
 
   const tabs = [
     ['home', 'Home'],
-    ['agents', 'Agents'],
+    ['agents', 'Directory'],
     ['scripts', 'Scripts'],
     ['campaigns', 'Campaigns'],
   ]
