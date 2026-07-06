@@ -37,6 +37,8 @@ export async function fetchAgents() {
     sourceUrl: r.source_url || '',
     lastVerified: r.last_verified || '',
     verified: r.record_status === 'Verified',
+    bio: r.bio || '',
+    press: r.press || '',
     live: true,
   }))
 }
@@ -97,6 +99,8 @@ export async function saveAgent(form) {
     last_verified: form.lastVerified || null,
     record_status: form.recordStatus || 'Needs verification',
     ai_policy: form.aiPolicy.trim() || null,
+    bio: form.bio.trim() || null,
+    press: form.press.trim() || null,
   }
   const { error } = await supabase.from('agents').upsert(row, { onConflict: 'id' })
   if (error) throw error
@@ -107,4 +111,10 @@ export async function fetchAgentRaw(id) {
   const { data, error } = await supabase.from('agents').select('*').eq('id', id).single()
   if (error) throw error
   return data
+}
+
+export async function bulkUpsertAgents(rows) {
+  const { error } = await supabase.from('agents').upsert(rows, { onConflict: 'id' })
+  if (error) throw error
+  return rows.length
 }

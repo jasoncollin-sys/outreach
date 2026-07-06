@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { dummyAgents, dummyEditors, dummyProdcos, dummyCompetitions } from './data/dummyAgents.js'
-import { fetchAgents, fetchEditors, fetchCompetitions, supabase, saveAgent, fetchAgentRaw } from './lib/db.js'
+import { fetchAgents, fetchEditors, fetchCompetitions, supabase, saveAgent, fetchAgentRaw, bulkUpsertAgents } from './lib/db.js'
 
 const TYPES = ['All', 'Agent', 'Manager', 'Script editor', 'Production company']
 const TYPE_LABELS = {
@@ -216,10 +216,45 @@ function Profile({ record, back }) {
       </p>
 
       <dl className="space-y-5 mb-10">
+        <Field label="Bio">{a.bio}</Field>
         <Field label="Openness">{a.acceptsUnsolicited}</Field>
         <Field label="Submission route">{a.submissionPolicy}</Field>
-        <Field label="Genres">{a.genres?.length ? a.genres.join(', ') : null}</Field>
-        <Field label="Clients & roster">{a.notableClients?.length ? a.notableClients.join('; ') : null}</Field>
+        <Field label="Areas of interest">{a.genres?.length ? a.genres.join(', ') : null}</Field>
+        {a.notableClients?.length && a.notableClients.join('').trim() ? (
+          <div>
+            <dt className="text-dim uppercase font-slug text-xs tracking-wider mb-1">Clients</dt>
+            <dd className="text-body text-sm leading-relaxed">
+              <ul className="list-disc list-inside space-y-0.5">
+                {a.notableClients.join('; ').split(/[;\n]/).map((cl) => cl.trim()).filter(Boolean).map((cl, i) => (
+                  <li key={i}>{cl}</li>
+                ))}
+              </ul>
+            </dd>
+          </div>
+        ) : null}
+        {a.press && a.press.trim() ? (
+          <div>
+            <dt className="text-dim uppercase font-slug text-xs tracking-wider mb-1">In the press</dt>
+            <dd className="text-body text-sm leading-relaxed space-y-1">
+              {a.press.split('\n').map((line) => line.trim()).filter(Boolean).map((line, i) => {
+                const m = line.match(/https?:\/\/\S+/)
+                const url = m ? m[0] : null
+                const text = url ? line.replace(url, '').trim() : line
+                return (
+                  <p key={i}>
+                    {text}
+                    {url && (
+                      <>
+                        {' '}
+                        <a href={url} target="_blank" rel="noreferrer" className="text-accentHi underline">read</a>
+                      </>
+                    )}
+                  </p>
+                )
+              })}
+            </dd>
+          </div>
+        ) : null}
         <Field label="Intelligence">{a.recentDeals || a.recent_deals_notes}</Field>
         <Field label="AI policy">{a.aiPolicy}</Field>
         <Field label="Published contact">
@@ -613,7 +648,7 @@ const BLANK_AGENT = {
   id: '', firstName: '', lastName: '', role: 'Agent', agency: '', agencySize: '',
   website: '', submissionEmail: '', submissionPageUrl: '', acceptsUnsolicited: '',
   submissionPolicy: '', genres: '', notableClients: '', recentDeals: '',
-  sourceUrl: '', lastVerified: '', recordStatus: 'Needs verification', aiPolicy: '',
+  sourceUrl: '', lastVerified: '', recordStatus: 'Needs verification', aiPolicy: '', bio: '', press: '',
 }
 
 function Admin({ session, reps, refresh }) {
@@ -621,6 +656,9 @@ function Admin({ session, reps, refresh }) {
   const [sent, setSent] = useState(false)
   const [form, setForm] = useState(BLANK_AGENT)
   const [status, setStatus] = useState('')
+  const [mode, setMode] = useState('single')
+  const [bulkText, setBulkText] = useState('')
+  const [bulkRows, setBulkRows] = useState(null)
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
 
   const signIn = async () => {
@@ -644,7 +682,7 @@ function Admin({ session, reps, refresh }) {
         genres: (r.genres || []).join(', '), notableClients: r.notable_clients || '',
         recentDeals: r.recent_deals_notes || '', sourceUrl: r.source_url || '',
         lastVerified: r.last_verified || '', recordStatus: r.record_status || 'Needs verification',
-        aiPolicy: r.ai_policy || '',
+        aiPolicy: r.ai_policy || '', bio: r.bio || '', press: r.press || '',
       })
     } catch { setStatus('Could not load that record.') }
   }
@@ -694,6 +732,45 @@ function Admin({ session, reps, refresh }) {
         <button onClick={() => supabase.auth.signOut()} className="text-dim hover:text-body text-sm">Sign out</button>
       </div>
 
+      <div className="flex gap-2 mb-6">
+        <button onClick={() => setMode('single')} className={`text-sm px-4 py-1.5 rounded-lg border transition ${mode === 'single' ? 'border-accent/50 text-accentHi bg-accent/10' : 'border-edge text-dim hover:text-body'}`}>Single record</button>
+        <button onClick={() => setMode('bulk')} className={`text-sm px-4 py-1.5 rounded-lg border transition ${mode === 'bulk' ? 'border-accent/50 text-accentHi bg-accent/10' : 'border-edge text-dim hover:text-body'}`}>Bulk import</button>
+      </div>
+
+      {mode === 'bulk' ? (
+        <div className="bg-panel/60 border border-edge rounded-xl p-5 space-y-4">
+          <p className="text-dim text-sm">Paste a JSON block of researched records (Claude produces these). Preview appears below before anything is saved.</p>
+          <textarea rows={10} className="w-full px-3 py-2 bg-ink text-body rounded-lg border border-edge focus:border-accent outline-none text-xs font-mono" value={bulkText} onChange={(e) => { setBulkText(e.target.value); setBulkRows(null); setStatus('') }} placeholder='[ {"id": "AG-020", "agency": "...", ...} ]' />
+          {!bulkRows ? (
+            <button onClick={() => {
+              try {
+                const rows = JSON.parse(bulkText)
+                if (!Array.isArray(rows) || !rows.length) throw new Error('Expected a JSON array of records')
+                for (const r of rows) if (!r.id || !r.agency) throw new Error('Every record needs id and agency')
+                setBulkRows(rows); setStatus('')
+              } catch (e) { setStatus(`Error: ${e.message}`) }
+            }} className="px-5 py-2 border border-accent/50 text-accentHi hover:bg-accent/10 rounded-lg text-sm transition">Preview</button>
+          ) : (
+            <div className="space-y-3">
+              <div className="space-y-1">
+                {bulkRows.map((r) => (
+                  <p key={r.id} className="text-body text-sm">{r.id} · {r.first_name ? `${r.first_name} ${r.last_name || ''}` : r.agency} <span className="text-dim">· {r.record_status || 'Needs verification'}</span></p>
+                ))}
+              </div>
+              <div className="flex gap-3">
+                <button onClick={async () => {
+                  setStatus('Importing…')
+                  try { const n = await bulkUpsertAgents(bulkRows); setStatus(`Imported ${n} records. Live now.`); setBulkRows(null); setBulkText(''); refresh() }
+                  catch (e) { setStatus(`Error: ${e.message}`) }
+                }} className="px-5 py-2 bg-accent hover:bg-accentHi rounded-lg text-white text-sm font-medium transition">Import {bulkRows.length} records</button>
+                <button onClick={() => setBulkRows(null)} className="px-4 py-2 text-dim hover:text-body text-sm">Cancel</button>
+              </div>
+            </div>
+          )}
+          {status && <p className="text-accentHi text-sm">{status}</p>}
+        </div>
+      ) : (
+      <>
       <div className="flex items-center gap-3 mb-8 flex-wrap">
         <span className="text-dim text-sm">Edit existing:</span>
         <select onChange={(e) => loadExisting(e.target.value)} className="px-3 py-2 bg-panel text-body rounded-lg border border-edge outline-none text-sm">
@@ -746,6 +823,8 @@ function Admin({ session, reps, refresh }) {
           <div><span className={lbl}>source url</span><input className={inp} value={form.sourceUrl} onChange={set('sourceUrl')} /></div>
           <div><span className={lbl}>last verified</span><input type="date" className={inp} value={form.lastVerified} onChange={set('lastVerified')} /></div>
         </div>
+        <div><span className={lbl}>bio</span><textarea rows={3} className={inp} value={form.bio} onChange={set('bio')} placeholder="Career background, from their own agency page" /></div>
+        <div><span className={lbl}>press (one per line: quote or headline, then the URL)</span><textarea rows={3} className={inp} value={form.press} onChange={set('press')} placeholder={'Named among Broadcast Hot Shots https://example.com/article'} /></div>
         <div><span className={lbl}>ai policy</span><input className={inp} value={form.aiPolicy} onChange={set('aiPolicy')} /></div>
         <div className="flex items-center justify-between pt-2 gap-4">
           <p className="text-dim text-xs max-w-sm">Data rules: identity from the organisation's own pages; contact routes only as published; source and date on everything.</p>
@@ -753,6 +832,8 @@ function Admin({ session, reps, refresh }) {
         </div>
         {status && <p className="text-accentHi text-sm">{status}</p>}
       </div>
+      </>
+      )}
     </div>
   )
 }
@@ -778,7 +859,11 @@ export default function App() {
     refresh()
     supabase.auth.getSession().then(({ data }) => setSession(data.session))
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s))
-    const onHash = () => setProfileId(window.location.hash.startsWith('#agent/') ? window.location.hash.slice(7) : null)
+    if (window.location.hash === '#admin') setPage('admin')
+    const onHash = () => {
+      setProfileId(window.location.hash.startsWith('#agent/') ? window.location.hash.slice(7) : null)
+      if (window.location.hash === '#admin') setPage('admin')
+    }
     window.addEventListener('hashchange', onHash)
     return () => { sub.subscription.unsubscribe(); window.removeEventListener('hashchange', onHash) }
   }, [])
@@ -804,7 +889,7 @@ export default function App() {
     ['scripts', 'Scripts'],
     ['plan', 'Game plan'],
     ['campaigns', 'Campaigns'],
-    ['admin', 'Admin'],
+    ...(session ? [['admin', 'Admin']] : []),
   ]
 
   const profileRecord = profileId ? directory.find((a) => a.id === profileId) : null
@@ -819,14 +904,14 @@ export default function App() {
 
       <nav className="border-b border-edge bg-ink/90 backdrop-blur sticky top-0 z-40">
         <div className="max-w-4xl mx-auto px-6 py-3.5 flex items-center justify-between">
-          <button onClick={() => setPage('home')} className="font-slug font-bold text-xl text-body tracking-wide">
+          <button onClick={() => { closeProfile(); setPage('home') }} className="font-slug font-bold text-xl text-body tracking-wide">
             OUTREACH<span className="text-accent animate-pulse">_</span>
           </button>
           <div className="flex gap-1">
             {tabs.map(([id, label]) => (
               <button
                 key={id}
-                onClick={() => setPage(id)}
+                onClick={() => { closeProfile(); setPage(id) }}
                 className={`text-sm px-3 py-1.5 rounded-lg transition ${
                   page === id ? 'text-accentHi bg-accent/10' : 'text-dim hover:text-body'
                 }`}
