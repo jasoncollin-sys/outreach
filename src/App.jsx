@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { dummyAgents, dummyEditors, dummyProdcos } from './data/dummyAgents.js'
+import { dummyAgents, dummyEditors, dummyProdcos, dummyCompetitions } from './data/dummyAgents.js'
 
 const directory = [...dummyAgents, ...dummyEditors, ...dummyProdcos]
 const TYPES = ['All', 'Agent', 'Manager', 'Script editor', 'Production company']
@@ -61,7 +61,7 @@ function Empty({ children }) {
 function Home({ go }) {
   const steps = [
     ['01', 'Ready the script', 'Script editors in the directory. Blind coverage — coming later.'],
-    ['02', 'Prove it', 'Competitions matched to your script — coming soon.'],
+    ['02', 'Prove it', 'Competition list live. Matching in your Game plan.'],
     ['03', 'Get represented', 'Verified UK managers and agents. Start here.'],
     ['04', 'Run the campaign', 'Tiered targets, drafted queries, tracked responses.'],
   ]
@@ -436,7 +436,132 @@ function Campaigns({ scripts, campaigns, setCampaigns }) {
   )
 }
 
-// ---------- shell ----------
+function Competitions() {
+  const sorted = [...dummyCompetitions].sort((a, b) => a.deadline.localeCompare(b.deadline))
+  const credStyle = {
+    High: 'border-accent/40 text-accentHi bg-accent/10',
+    Medium: 'border-edge text-dim',
+    Low: 'border-edge border-dashed text-dim/70',
+  }
+  return (
+    <div className="max-w-3xl mx-auto px-6 py-10">
+      <Slug scene="COMPETITIONS" />
+      <h2 className="text-3xl font-semibold text-body mb-1">Competitions</h2>
+      <p className="text-dim text-sm mb-8">
+        Demo listings, sorted by deadline. The live version tracks real deadlines, fees, and which placements
+        actually carry weight with reps.
+      </p>
+      <div className="space-y-3">
+        {sorted.map((c) => (
+          <div key={c.id} className="bg-panel/60 border border-edge rounded-lg p-4">
+            <div className="flex justify-between items-start gap-4 mb-1.5">
+              <p className="text-body font-medium">{c.name}</p>
+              <span className={`text-xs px-2.5 py-0.5 rounded-full border whitespace-nowrap ${credStyle[c.credibility]}`}>
+                {c.credibility} credibility
+              </span>
+            </div>
+            <p className="text-dim text-sm">
+              Deadline {c.deadline} · Entry {c.fee} · {c.genres.length > 4 ? 'All genres' : c.genres.join(', ')}
+            </p>
+            <p className="text-dim/80 text-sm mt-1 italic">{c.note}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function GamePlan({ scripts, go }) {
+  const [scriptId, setScriptId] = useState(scripts[0]?.id || '')
+  const script = scripts.find((s) => s.id === scriptId)
+
+  if (scripts.length === 0) {
+    return (
+      <div className="max-w-3xl mx-auto px-6 py-10">
+        <Slug scene="GAME PLAN" />
+        <h2 className="text-3xl font-semibold text-body mb-6">Game plan</h2>
+        <Empty>
+          Add a script first — the game plan is built from its genre and logline.{' '}
+          <button onClick={() => go('scripts')} className="text-accentHi underline">Go to Scripts</button>
+        </Empty>
+      </div>
+    )
+  }
+
+  const editors = dummyEditors.filter((e) => !script?.genre || e.genres.includes(script.genre))
+  const comps = dummyCompetitions
+    .filter((c) => !script?.genre || c.genres.includes(script.genre))
+    .sort((a, b) => (a.credibility === 'High' ? -1 : 1) - (b.credibility === 'High' ? -1 : 1) || a.deadline.localeCompare(b.deadline))
+  const reps = dummyAgents
+    .map((a) => ({ ...a, tier: tierAgent(a, script) }))
+    .filter((a) => a.tier === 'Primary')
+
+  const Section = ({ n, title, sub, children }) => (
+    <div className="mb-8">
+      <p className="font-slug text-accent text-xs tracking-widest mb-1">STEP {n}</p>
+      <p className="text-body font-medium mb-0.5">{title}</p>
+      <p className="text-dim text-sm mb-3">{sub}</p>
+      {children}
+    </div>
+  )
+
+  const Row = ({ main, side }) => (
+    <div className="bg-panel/60 border border-edge rounded-lg px-4 py-2.5 flex justify-between items-center gap-4 text-sm">
+      <span className="text-body">{main}</span>
+      <span className="text-dim whitespace-nowrap">{side}</span>
+    </div>
+  )
+
+  return (
+    <div className="max-w-3xl mx-auto px-6 py-10">
+      <Slug scene="GAME PLAN" />
+      <h2 className="text-3xl font-semibold text-body mb-6">Game plan</h2>
+
+      <div className="flex items-center gap-3 mb-10">
+        <span className="text-dim text-sm">For:</span>
+        <select value={scriptId} onChange={(e) => setScriptId(e.target.value)} className="px-3 py-2 bg-panel text-body rounded-lg border border-edge outline-none">
+          {scripts.map((s) => (
+            <option key={s.id} value={s.id}>{s.title} ({s.genre})</option>
+          ))}
+        </select>
+      </div>
+
+      <Section n="01" title="Get it match-fit" sub={`${editors.length} script editors work in ${script?.genre || 'your genre'}. Fresh eyes before anyone important reads it.`}>
+        <div className="space-y-2">
+          {editors.map((e) => (
+            <Row key={e.id} main={`${e.firstName} ${e.lastName} · ${e.agency}`} side={e.submissionPolicy.split(';')[0]} />
+          ))}
+        </div>
+      </Section>
+
+      <Section n="02" title="Enter the right competitions" sub="Matched to genre, high-credibility first. Placements become query-letter ammunition.">
+        <div className="space-y-2">
+          {comps.slice(0, 4).map((c) => (
+            <Row key={c.id} main={c.name} side={`${c.deadline} · ${c.fee}`} />
+          ))}
+        </div>
+      </Section>
+
+      <Section n="03" title="Query your primary targets" sub={`${reps.length} reps are open to unsolicited ${script?.genre || ''} submissions — your first wave.`}>
+        <div className="space-y-2">
+          {reps.slice(0, 5).map((a) => (
+            <Row key={a.id} main={`${a.firstName} ${a.lastName} · ${a.agency}`} side={a.role} />
+          ))}
+        </div>
+      </Section>
+
+      <button onClick={() => go('campaigns')} className="px-6 py-3 bg-accent hover:bg-accentHi transition rounded-lg text-white font-medium">
+        Turn this into a campaign
+      </button>
+      <p className="text-dim text-xs mt-4">
+        Demo matching is rules-based (genre and openness). The live version layers AI over your logline, comps,
+        and each target's published record — without ever needing to read your script.
+      </p>
+    </div>
+  )
+}
+
+
 export default function App() {
   const [page, setPage] = useState('home')
   const [scripts, setScriptsRaw] = useState(() => load('outreach_scripts', []))
@@ -450,7 +575,9 @@ export default function App() {
   const tabs = [
     ['home', 'Home'],
     ['agents', 'Directory'],
+    ['competitions', 'Competitions'],
     ['scripts', 'Scripts'],
+    ['plan', 'Game plan'],
     ['campaigns', 'Campaigns'],
   ]
 
@@ -483,7 +610,9 @@ export default function App() {
 
       {page === 'home' && <Home go={setPage} />}
       {page === 'agents' && <Agents scripts={scripts} />}
+      {page === 'competitions' && <Competitions />}
       {page === 'scripts' && <Scripts scripts={scripts} setScripts={setScripts} />}
+      {page === 'plan' && <GamePlan scripts={scripts} go={setPage} />}
       {page === 'campaigns' && <Campaigns scripts={scripts} campaigns={campaigns} setCampaigns={setCampaigns} />}
 
       <footer className="border-t border-edge mt-16">

@@ -30,3 +30,13 @@ export const dummyProdcos = [
   { id: 'DP-02', firstName: '', lastName: '', role: 'Production company', agency: 'Demo Films Ltd (demo)', agencySize: 'Boutique', genres: ['Thriller', 'Horror'], acceptsUnsolicited: 'Query letter first', submissionPolicy: 'Open to queries during announced windows.', notableClients: ['(placeholder title)'], verified: false },
   { id: 'DP-03', firstName: '', lastName: '', role: 'Production company', agency: 'Placeholder Productions (demo)', agencySize: 'Large', genres: ['Drama', 'Sci-Fi'], acceptsUnsolicited: 'No', submissionPolicy: 'Development slate via reps and labs.', notableClients: ['(placeholder title)'], verified: false },
 ]
+
+// Competitions — fictional placeholders with plausible shapes.
+export const dummyCompetitions = [
+  { id: 'DC-01', name: 'Example Screenplay Prize (demo)', deadline: '2026-09-15', fee: '£45', genres: ['Crime', 'Drama', 'Thriller'], credibility: 'High', note: 'Industry readers; past winners signed by reps.' },
+  { id: 'DC-02', name: 'Placeholder Pages Award (demo)', deadline: '2026-08-01', fee: '£30', genres: ['Comedy', 'Drama'], credibility: 'Medium', note: 'Feedback included with entry.' },
+  { id: 'DC-03', name: 'Demo Genre Screenplay Contest (demo)', deadline: '2026-10-30', fee: '£25', genres: ['Horror', 'Sci-Fi', 'Thriller'], credibility: 'Medium', note: 'Genre specialist; strong community.' },
+  { id: 'DC-04', name: 'Specimen International Fellowship (demo)', deadline: '2026-11-20', fee: 'Free', genres: ['Crime', 'Drama', 'Comedy', 'Thriller', 'Horror', 'Sci-Fi'], credibility: 'High', note: 'Free to enter; extremely competitive.' },
+  { id: 'DC-05', name: 'Fictional First Ten Pages Award (demo)', deadline: '2026-08-22', fee: '£15', genres: ['Crime', 'Drama', 'Comedy', 'Thriller', 'Horror', 'Sci-Fi'], credibility: 'Low', note: 'Cheap entry; modest industry weight.' },
+  { id: 'DC-06', name: 'Sample City Film Lab (demo)', deadline: '2026-12-05', fee: '£55', genres: ['Drama', 'Crime'], credibility: 'High', note: 'Lab place plus mentorship for finalists.' },
+]
