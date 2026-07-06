@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { dummyAgents, dummyEditors, dummyProdcos, dummyCompetitions } from './data/dummyAgents.js'
+import { fetchAgents, fetchEditors, fetchCompetitions } from './lib/db.js'
 
-const directory = [...dummyAgents, ...dummyEditors, ...dummyProdcos]
 const TYPES = ['All', 'Agent', 'Manager', 'Script editor', 'Production company']
 const TYPE_LABELS = {
   All: 'All types',
@@ -100,7 +100,7 @@ function Home({ go }) {
   )
 }
 
-function Agents({ scripts }) {
+function Agents({ directory }) {
   const [q, setQ] = useState('')
   const [role, setRole] = useState('All')
   const [openOnly, setOpenOnly] = useState(false)
@@ -119,8 +119,8 @@ function Agents({ scripts }) {
       <Slug scene="THE DIRECTORY" />
       <h2 className="text-3xl font-semibold text-body mb-1">{directory.length} listings across the industry</h2>
       <p className="text-dim text-sm mb-8">
-        Demo records only. The real database is hand-verified against each agency's own website, with a source
-        and last-checked date on every record.
+        Records marked verified are checked against each organisation's own website, with a source and
+        last-checked date. Demo placeholders are labelled (demo).
       </p>
 
       <div className="flex flex-col sm:flex-row gap-3 mb-8">
@@ -195,12 +195,29 @@ function Agents({ scripts }) {
               </div>
               <div>
                 <dt className="text-dim uppercase font-slug text-xs tracking-wider mb-1">Verification</dt>
-                <dd className="text-accentHi">Demo record — not verified, not contactable</dd>
+                {selected.verified ? (
+                  <dd className="text-body">
+                    Verified {selected.lastVerified}
+                    {selected.sourceUrl && (
+                      <>
+                        {' · '}
+                        <a href={selected.sourceUrl} target="_blank" rel="noreferrer" className="text-accentHi underline">
+                          source
+                        </a>
+                      </>
+                    )}
+                  </dd>
+                ) : (
+                  <dd className="text-accentHi">{selected.live ? 'Needs verification' : 'Demo record — not verified, not contactable'}</dd>
+                )}
               </div>
+              {selected.aiPolicy && (
+                <div>
+                  <dt className="text-dim uppercase font-slug text-xs tracking-wider mb-1">AI policy</dt>
+                  <dd className="text-body">{selected.aiPolicy}</dd>
+                </div>
+              )}
             </dl>
-            <p className="text-dim text-xs">
-              In the live version this shows the published submission route, source link, and last-verified date.
-            </p>
           </div>
         </div>
       )}
@@ -277,11 +294,11 @@ function Scripts({ scripts, setScripts }) {
   )
 }
 
-function Campaigns({ scripts, campaigns, setCampaigns }) {
+function Campaigns({ scripts, campaigns, setCampaigns, reps }) {
   const [openId, setOpenId] = useState(null)
 
   const create = (script) => {
-    const agents = dummyAgents.map((a) => ({
+    const agents = reps.map((a) => ({
       agentId: a.id,
       name: `${a.firstName} ${a.lastName}`,
       agency: a.agency,
@@ -443,8 +460,8 @@ function Campaigns({ scripts, campaigns, setCampaigns }) {
   )
 }
 
-function Competitions() {
-  const sorted = [...dummyCompetitions].sort((a, b) => a.deadline.localeCompare(b.deadline))
+function Competitions({ comps }) {
+  const sorted = [...comps].sort((a, b) => String(a.deadline).localeCompare(String(b.deadline)))
   const credStyle = {
     High: 'border-accent/40 text-accentHi bg-accent/10',
     Medium: 'border-edge text-dim',
@@ -478,7 +495,7 @@ function Competitions() {
   )
 }
 
-function GamePlan({ scripts, go }) {
+function GamePlan({ scripts, go, reps, editors: allEditors, comps: allComps }) {
   const [scriptId, setScriptId] = useState(scripts[0]?.id || '')
   const script = scripts.find((s) => s.id === scriptId)
 
@@ -495,11 +512,11 @@ function GamePlan({ scripts, go }) {
     )
   }
 
-  const editors = dummyEditors.filter((e) => !script?.genre || e.genres.includes(script.genre))
-  const comps = dummyCompetitions
+  const editors = allEditors.filter((e) => !script?.genre || e.genres.includes(script.genre))
+  const comps = allComps
     .filter((c) => !script?.genre || c.genres.includes(script.genre))
-    .sort((a, b) => (a.credibility === 'High' ? -1 : 1) - (b.credibility === 'High' ? -1 : 1) || a.deadline.localeCompare(b.deadline))
-  const reps = dummyAgents
+    .sort((a, b) => (a.credibility === 'High' ? -1 : 1) - (b.credibility === 'High' ? -1 : 1) || String(a.deadline).localeCompare(String(b.deadline)))
+  const reps_ = reps
     .map((a) => ({ ...a, tier: tierAgent(a, script) }))
     .filter((a) => a.tier === 'Primary')
 
@@ -549,9 +566,9 @@ function GamePlan({ scripts, go }) {
         </div>
       </Section>
 
-      <Section n="03" title="Query your primary targets" sub={`${reps.length} reps are open to unsolicited ${script?.genre || ''} submissions — your first wave.`}>
+      <Section n="03" title="Query your primary targets" sub={`${reps_.length} reps are open to unsolicited ${script?.genre || ''} submissions — your first wave.`}>
         <div className="space-y-2">
-          {reps.slice(0, 5).map((a) => (
+          {reps_.slice(0, 5).map((a) => (
             <Row key={a.id} main={`${a.firstName} ${a.lastName} · ${a.agency}`} side={a.role} />
           ))}
         </div>
@@ -573,6 +590,21 @@ export default function App() {
   const [page, setPage] = useState('home')
   const [scripts, setScriptsRaw] = useState(() => load('outreach_scripts', []))
   const [campaigns, setCampaignsRaw] = useState(() => load('outreach_campaigns', []))
+  const [liveAgents, setLiveAgents] = useState([])
+  const [liveEditors, setLiveEditors] = useState([])
+  const [liveComps, setLiveComps] = useState([])
+
+  useEffect(() => {
+    fetchAgents().then(setLiveAgents).catch(() => {})
+    fetchEditors().then(setLiveEditors).catch(() => {})
+    fetchCompetitions().then(setLiveComps).catch(() => {})
+  }, [])
+
+  const reps = liveAgents.length ? liveAgents : dummyAgents
+  const editors = liveEditors.length ? liveEditors : dummyEditors
+  const comps = liveComps.length ? liveComps : dummyCompetitions
+  const directory = [...reps, ...editors, ...dummyProdcos]
+  const liveMode = liveAgents.length > 0
 
   const setScripts = (v) => { setScriptsRaw(v); save('outreach_scripts', v) }
   const setCampaigns = (v) => { setCampaignsRaw(v); save('outreach_campaigns', v) }
@@ -591,7 +623,9 @@ export default function App() {
   return (
     <div className="min-h-screen font-sans">
       <div className="bg-accent text-white text-center text-xs font-slug tracking-widest uppercase py-1.5">
-        Demo — all agent data on this site is fictional placeholder content
+        {liveMode
+          ? `Live database — ${liveAgents.length} verified-sourced agent records · other sections still demo data`
+          : 'Demo — all agent data on this site is fictional placeholder content'}
       </div>
 
       <nav className="border-b border-edge bg-ink/90 backdrop-blur sticky top-0 z-40">
@@ -616,11 +650,11 @@ export default function App() {
       </nav>
 
       {page === 'home' && <Home go={setPage} />}
-      {page === 'agents' && <Agents scripts={scripts} />}
-      {page === 'competitions' && <Competitions />}
+      {page === 'agents' && <Agents directory={directory} />}
+      {page === 'competitions' && <Competitions comps={comps} />}
       {page === 'scripts' && <Scripts scripts={scripts} setScripts={setScripts} />}
-      {page === 'plan' && <GamePlan scripts={scripts} go={setPage} />}
-      {page === 'campaigns' && <Campaigns scripts={scripts} campaigns={campaigns} setCampaigns={setCampaigns} />}
+      {page === 'plan' && <GamePlan scripts={scripts} go={setPage} reps={reps} editors={editors} comps={comps} />}
+      {page === 'campaigns' && <Campaigns scripts={scripts} campaigns={campaigns} setCampaigns={setCampaigns} reps={reps} />}
 
       <footer className="border-t border-edge mt-16">
         <div className="max-w-4xl mx-auto px-6 py-6 flex justify-between items-center">
