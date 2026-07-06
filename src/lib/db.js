@@ -1,8 +1,13 @@
 // Live data layer — reads from Supabase over its REST API.
 // The publishable key below is PUBLIC BY DESIGN: the database enforces
-// read-only access via row level security, so this key can only read.
+// read-only access for anonymous visitors via row level security.
+// Writes require a signed-in session (magic link) — see supabase client below.
+import { createClient } from '@supabase/supabase-js'
+
 const SUPABASE_URL = 'https://wrmwmsnjqrrcpbvqrlnp.supabase.co'
 const SUPABASE_KEY = 'sb_publishable_tyxhBH5vO5TIZ14-kxI91Q_bTdLE6j2'
+
+export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
 
 async function fetchTable(table) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=*&order=id.asc`, {
@@ -69,4 +74,37 @@ export async function fetchCompetitions() {
     note: r.why_credible || '',
     live: true,
   }))
+}
+
+// ---- Admin writes (require signed-in session; RLS enforces this) ----
+export async function saveAgent(form) {
+  const row = {
+    id: form.id.trim(),
+    first_name: form.firstName.trim() || null,
+    last_name: form.lastName.trim() || null,
+    role: form.role || 'Agent',
+    agency: form.agency.trim(),
+    agency_size: form.agencySize || null,
+    website: form.website.trim() || null,
+    submission_email: form.submissionEmail.trim() || null,
+    submission_page_url: form.submissionPageUrl.trim() || null,
+    accepts_unsolicited: form.acceptsUnsolicited || null,
+    submission_policy: form.submissionPolicy.trim() || null,
+    genres: form.genres.split(',').map((g) => g.trim()).filter(Boolean),
+    notable_clients: form.notableClients.trim() || null,
+    recent_deals_notes: form.recentDeals.trim() || null,
+    source_url: form.sourceUrl.trim() || null,
+    last_verified: form.lastVerified || null,
+    record_status: form.recordStatus || 'Needs verification',
+    ai_policy: form.aiPolicy.trim() || null,
+  }
+  const { error } = await supabase.from('agents').upsert(row, { onConflict: 'id' })
+  if (error) throw error
+  return row.id
+}
+
+export async function fetchAgentRaw(id) {
+  const { data, error } = await supabase.from('agents').select('*').eq('id', id).single()
+  if (error) throw error
+  return data
 }

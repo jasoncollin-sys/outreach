@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { dummyAgents, dummyEditors, dummyProdcos, dummyCompetitions } from './data/dummyAgents.js'
-import { fetchAgents, fetchEditors, fetchCompetitions } from './lib/db.js'
+import { fetchAgents, fetchEditors, fetchCompetitions, supabase, saveAgent, fetchAgentRaw } from './lib/db.js'
 
 const TYPES = ['All', 'Agent', 'Manager', 'Script editor', 'Production company']
 const TYPE_LABELS = {
@@ -100,16 +100,17 @@ function Home({ go }) {
   )
 }
 
-function Agents({ directory }) {
+function Agents({ directory, openProfile }) {
   const [q, setQ] = useState('')
   const [role, setRole] = useState('All')
+  const [size, setSize] = useState('All')
   const [openOnly, setOpenOnly] = useState(false)
-  const [selected, setSelected] = useState(null)
 
   const list = directory.filter((a) => {
     const text = `${a.firstName} ${a.lastName} ${a.agency}`.toLowerCase()
     if (q && !text.includes(q.toLowerCase())) return false
     if (role !== 'All' && a.role !== role) return false
+    if (size !== 'All' && a.agencySize !== size) return false
     if (openOnly && a.acceptsUnsolicited !== 'Yes') return false
     return true
   })
@@ -135,6 +136,12 @@ function Agents({ directory }) {
             <option key={t} value={t}>{TYPE_LABELS[t]}</option>
           ))}
         </select>
+        <select value={size} onChange={(e) => setSize(e.target.value)} className="px-3 py-2.5 bg-panel text-body rounded-lg border border-edge outline-none">
+          <option value="All">All sizes</option>
+          <option>Boutique</option>
+          <option>Mid</option>
+          <option>Large</option>
+        </select>
         <label className="flex items-center gap-2 text-dim text-sm px-2 cursor-pointer select-none">
           <input type="checkbox" checked={openOnly} onChange={(e) => setOpenOnly(e.target.checked)} className="accent-[#F2620F]" />
           Open to unsolicited
@@ -146,7 +153,7 @@ function Agents({ directory }) {
         {list.map((a) => (
           <button
             key={a.id}
-            onClick={() => setSelected(a)}
+            onClick={() => openProfile(a.id)}
             className="w-full text-left bg-panel/60 border border-edge rounded-lg p-4 hover:border-accent/50 transition flex items-center justify-between gap-4"
           >
             <div>
@@ -170,57 +177,73 @@ function Agents({ directory }) {
           </button>
         ))}
       </div>
+    </div>
+  )
+}
 
-      {selected && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-6 z-50" onClick={() => setSelected(null)}>
-          <div className="bg-panel border border-edge rounded-xl max-w-lg w-full p-7" onClick={(e) => e.stopPropagation()}>
-            <div className="flex justify-between items-start mb-5">
-              <div>
-                <p className="font-slug text-xs text-accent tracking-widest uppercase mb-1">Character profile</p>
-                <h3 className="text-2xl font-semibold text-body">
-                  {selected.firstName ? `${selected.firstName} ${selected.lastName}` : selected.agency}
-                </h3>
-                <p className="text-dim">{selected.firstName ? `${selected.agency} · ` : ''}{selected.role}</p>
-              </div>
-              <button onClick={() => setSelected(null)} className="text-dim hover:text-body text-xl leading-none">✕</button>
-            </div>
-            <dl className="space-y-3 text-sm mb-6">
-              <div>
-                <dt className="text-dim uppercase font-slug text-xs tracking-wider mb-1">Genres</dt>
-                <dd className="text-body">{selected.genres.join(', ')}</dd>
-              </div>
-              <div>
-                <dt className="text-dim uppercase font-slug text-xs tracking-wider mb-1">Submissions</dt>
-                <dd className="text-body">{selected.submissionPolicy}</dd>
-              </div>
-              <div>
-                <dt className="text-dim uppercase font-slug text-xs tracking-wider mb-1">Verification</dt>
-                {selected.verified ? (
-                  <dd className="text-body">
-                    Verified {selected.lastVerified}
-                    {selected.sourceUrl && (
-                      <>
-                        {' · '}
-                        <a href={selected.sourceUrl} target="_blank" rel="noreferrer" className="text-accentHi underline">
-                          source
-                        </a>
-                      </>
-                    )}
-                  </dd>
-                ) : (
-                  <dd className="text-accentHi">{selected.live ? 'Needs verification' : 'Demo record — not verified, not contactable'}</dd>
-                )}
-              </div>
-              {selected.aiPolicy && (
-                <div>
-                  <dt className="text-dim uppercase font-slug text-xs tracking-wider mb-1">AI policy</dt>
-                  <dd className="text-body">{selected.aiPolicy}</dd>
-                </div>
+function Profile({ record, back }) {
+  if (!record) {
+    return (
+      <div className="max-w-3xl mx-auto px-6 py-10">
+        <button onClick={back} className="text-dim hover:text-body text-sm mb-6">← Directory</button>
+        <Empty>Record not found.</Empty>
+      </div>
+    )
+  }
+  const a = record
+  const name = a.firstName ? `${a.firstName} ${a.lastName}` : a.agency
+  const Field = ({ label, children }) =>
+    children ? (
+      <div>
+        <dt className="text-dim uppercase font-slug text-xs tracking-wider mb-1">{label}</dt>
+        <dd className="text-body text-sm leading-relaxed">{children}</dd>
+      </div>
+    ) : null
+  return (
+    <div className="max-w-3xl mx-auto px-6 py-10">
+      <button onClick={back} className="text-dim hover:text-body text-sm mb-6">← Directory</button>
+      <Slug scene={`PROFILE — ${name.toUpperCase()}`} />
+      <div className="flex items-start justify-between gap-4 mb-2">
+        <h2 className="text-3xl font-semibold text-body">{name}</h2>
+        {a.verified ? (
+          <span className="text-xs px-2.5 py-1 rounded-full border border-accent/40 text-accentHi bg-accent/10 whitespace-nowrap mt-2">Verified {a.lastVerified}</span>
+        ) : (
+          <span className="text-xs px-2.5 py-1 rounded-full border border-edge text-dim whitespace-nowrap mt-2">{a.live ? 'Needs verification' : 'Demo record'}</span>
+        )}
+      </div>
+      <p className="text-dim mb-8">
+        {a.firstName ? `${a.agency} · ` : ''}{a.role}{a.agencySize ? ` · ${a.agencySize}` : ''}
+      </p>
+
+      <dl className="space-y-5 mb-10">
+        <Field label="Openness">{a.acceptsUnsolicited}</Field>
+        <Field label="Submission route">{a.submissionPolicy}</Field>
+        <Field label="Genres">{a.genres?.length ? a.genres.join(', ') : null}</Field>
+        <Field label="Clients & roster">{a.notableClients?.length ? a.notableClients.join('; ') : null}</Field>
+        <Field label="Intelligence">{a.recentDeals || a.recent_deals_notes}</Field>
+        <Field label="AI policy">{a.aiPolicy}</Field>
+        <Field label="Published contact">
+          {a.submissionEmail || a.submissionPageUrl ? (
+            <>
+              {a.submissionEmail}
+              {a.submissionEmail && a.submissionPageUrl ? ' · ' : ''}
+              {a.submissionPageUrl && (
+                <a href={a.submissionPageUrl} target="_blank" rel="noreferrer" className="text-accentHi underline">submission page</a>
               )}
-            </dl>
-          </div>
-        </div>
-      )}
+            </>
+          ) : null}
+        </Field>
+        <Field label="Website">{a.website}</Field>
+        <Field label="Source">
+          {a.sourceUrl ? (
+            <a href={a.sourceUrl} target="_blank" rel="noreferrer" className="text-accentHi underline">{a.sourceUrl}</a>
+          ) : null}
+        </Field>
+      </dl>
+      <p className="text-dim text-xs">
+        Spotted something out of date? The live product will let you report a change on any record — for now,
+        every record carries its source so you can check the primary yourself.
+      </p>
     </div>
   )
 }
@@ -586,6 +609,155 @@ function GamePlan({ scripts, go, reps, editors: allEditors, comps: allComps }) {
 }
 
 
+const BLANK_AGENT = {
+  id: '', firstName: '', lastName: '', role: 'Agent', agency: '', agencySize: '',
+  website: '', submissionEmail: '', submissionPageUrl: '', acceptsUnsolicited: '',
+  submissionPolicy: '', genres: '', notableClients: '', recentDeals: '',
+  sourceUrl: '', lastVerified: '', recordStatus: 'Needs verification', aiPolicy: '',
+}
+
+function Admin({ session, reps, refresh }) {
+  const [email, setEmail] = useState('')
+  const [sent, setSent] = useState(false)
+  const [form, setForm] = useState(BLANK_AGENT)
+  const [status, setStatus] = useState('')
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
+
+  const signIn = async () => {
+    const { error } = await supabase.auth.signInWithOtp({
+      email: email.trim(),
+      options: { emailRedirectTo: window.location.origin },
+    })
+    setStatus(error ? `Error: ${error.message}` : '')
+    if (!error) setSent(true)
+  }
+
+  const loadExisting = async (id) => {
+    if (!id) { setForm(BLANK_AGENT); return }
+    try {
+      const r = await fetchAgentRaw(id)
+      setForm({
+        id: r.id, firstName: r.first_name || '', lastName: r.last_name || '', role: r.role || 'Agent',
+        agency: r.agency || '', agencySize: r.agency_size || '', website: r.website || '',
+        submissionEmail: r.submission_email || '', submissionPageUrl: r.submission_page_url || '',
+        acceptsUnsolicited: r.accepts_unsolicited || '', submissionPolicy: r.submission_policy || '',
+        genres: (r.genres || []).join(', '), notableClients: r.notable_clients || '',
+        recentDeals: r.recent_deals_notes || '', sourceUrl: r.source_url || '',
+        lastVerified: r.last_verified || '', recordStatus: r.record_status || 'Needs verification',
+        aiPolicy: r.ai_policy || '',
+      })
+    } catch { setStatus('Could not load that record.') }
+  }
+
+  const submit = async () => {
+    if (!form.id.trim() || !form.agency.trim()) { setStatus('id and agency are required.'); return }
+    setStatus('Saving…')
+    try {
+      const id = await saveAgent(form)
+      setStatus(`Saved ${id}. Live on the site now.`)
+      refresh()
+    } catch (e) { setStatus(`Error: ${e.message}`) }
+  }
+
+  if (!session) {
+    return (
+      <div className="max-w-md mx-auto px-6 py-16">
+        <Slug scene="ADMIN — SIGN IN" />
+        <h2 className="text-3xl font-semibold text-body mb-6">Admin</h2>
+        {sent ? (
+          <p className="text-body">Check your email — a sign-in link is on its way. Clicking it brings you back here, signed in.</p>
+        ) : (
+          <div className="space-y-3">
+            <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com"
+              className="w-full px-4 py-2.5 bg-panel text-body rounded-lg border border-edge focus:border-accent outline-none placeholder:text-dim/60" />
+            <button onClick={signIn} className="px-5 py-2.5 bg-accent hover:bg-accentHi transition rounded-lg text-white font-medium">
+              Email me a sign-in link
+            </button>
+            {status && <p className="text-accentHi text-sm">{status}</p>}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  const nextId = 'AG-' + String(reps.filter((r) => r.live).length + 1).padStart(3, '0')
+  const inp = 'w-full px-3 py-2 bg-ink text-body rounded-lg border border-edge focus:border-accent outline-none placeholder:text-dim/50 text-sm'
+  const lbl = 'text-dim text-xs uppercase font-slug tracking-wider mb-1 block'
+
+  return (
+    <div className="max-w-3xl mx-auto px-6 py-10">
+      <div className="flex items-baseline justify-between mb-6">
+        <div>
+          <Slug scene="ADMIN — AGENT RECORDS" />
+          <h2 className="text-3xl font-semibold text-body">Add / edit a record</h2>
+        </div>
+        <button onClick={() => supabase.auth.signOut()} className="text-dim hover:text-body text-sm">Sign out</button>
+      </div>
+
+      <div className="flex items-center gap-3 mb-8 flex-wrap">
+        <span className="text-dim text-sm">Edit existing:</span>
+        <select onChange={(e) => loadExisting(e.target.value)} className="px-3 py-2 bg-panel text-body rounded-lg border border-edge outline-none text-sm">
+          <option value="">— new record —</option>
+          {reps.filter((r) => r.live).map((r) => (
+            <option key={r.id} value={r.id}>{r.id} · {r.firstName ? `${r.firstName} ${r.lastName}` : r.agency}</option>
+          ))}
+        </select>
+        <span className="text-dim text-xs">next free id: {nextId}</span>
+      </div>
+
+      <div className="bg-panel/60 border border-edge rounded-xl p-5 space-y-4">
+        <div className="grid sm:grid-cols-4 gap-3">
+          <div><span className={lbl}>id *</span><input className={inp} value={form.id} onChange={set('id')} placeholder={nextId} /></div>
+          <div><span className={lbl}>first name</span><input className={inp} value={form.firstName} onChange={set('firstName')} /></div>
+          <div><span className={lbl}>last name</span><input className={inp} value={form.lastName} onChange={set('lastName')} /></div>
+          <div><span className={lbl}>role</span>
+            <select className={inp} value={form.role} onChange={set('role')}>
+              <option>Agent</option><option>Manager</option><option>Agents Assistant</option>
+            </select></div>
+        </div>
+        <div className="grid sm:grid-cols-3 gap-3">
+          <div className="sm:col-span-2"><span className={lbl}>agency *</span><input className={inp} value={form.agency} onChange={set('agency')} /></div>
+          <div><span className={lbl}>size</span>
+            <select className={inp} value={form.agencySize} onChange={set('agencySize')}>
+              <option value="">—</option><option>Boutique</option><option>Mid</option><option>Large</option>
+            </select></div>
+        </div>
+        <div className="grid sm:grid-cols-2 gap-3">
+          <div><span className={lbl}>website</span><input className={inp} value={form.website} onChange={set('website')} /></div>
+          <div><span className={lbl}>submission email (published only)</span><input className={inp} value={form.submissionEmail} onChange={set('submissionEmail')} /></div>
+        </div>
+        <div><span className={lbl}>submission page url</span><input className={inp} value={form.submissionPageUrl} onChange={set('submissionPageUrl')} /></div>
+        <div className="grid sm:grid-cols-2 gap-3">
+          <div><span className={lbl}>accepts unsolicited</span>
+            <select className={inp} value={form.acceptsUnsolicited} onChange={set('acceptsUnsolicited')}>
+              <option value="">—</option><option>Yes</option><option>No</option><option>Query letter first</option>
+              <option>Closed - check back</option><option>Check agent pages</option>
+            </select></div>
+          <div><span className={lbl}>record status</span>
+            <select className={inp} value={form.recordStatus} onChange={set('recordStatus')}>
+              <option>Needs verification</option><option>Verified</option><option>Stale</option><option>Removed on request</option>
+            </select></div>
+        </div>
+        <div><span className={lbl}>submission policy</span><textarea rows={3} className={inp} value={form.submissionPolicy} onChange={set('submissionPolicy')} /></div>
+        <div><span className={lbl}>genres (comma separated)</span><input className={inp} value={form.genres} onChange={set('genres')} placeholder="Crime, Drama, Thriller" /></div>
+        <div><span className={lbl}>clients & roster</span><textarea rows={2} className={inp} value={form.notableClients} onChange={set('notableClients')} /></div>
+        <div><span className={lbl}>intelligence / recent deals</span><textarea rows={2} className={inp} value={form.recentDeals} onChange={set('recentDeals')} /></div>
+        <div className="grid sm:grid-cols-2 gap-3">
+          <div><span className={lbl}>source url</span><input className={inp} value={form.sourceUrl} onChange={set('sourceUrl')} /></div>
+          <div><span className={lbl}>last verified</span><input type="date" className={inp} value={form.lastVerified} onChange={set('lastVerified')} /></div>
+        </div>
+        <div><span className={lbl}>ai policy</span><input className={inp} value={form.aiPolicy} onChange={set('aiPolicy')} /></div>
+        <div className="flex items-center justify-between pt-2 gap-4">
+          <p className="text-dim text-xs max-w-sm">Data rules: identity from the organisation's own pages; contact routes only as published; source and date on everything.</p>
+          <button onClick={submit} className="px-6 py-2.5 bg-accent hover:bg-accentHi transition rounded-lg text-white font-medium whitespace-nowrap">Save record</button>
+        </div>
+        {status && <p className="text-accentHi text-sm">{status}</p>}
+      </div>
+    </div>
+  )
+}
+
+
 export default function App() {
   const [page, setPage] = useState('home')
   const [scripts, setScriptsRaw] = useState(() => load('outreach_scripts', []))
@@ -593,12 +765,26 @@ export default function App() {
   const [liveAgents, setLiveAgents] = useState([])
   const [liveEditors, setLiveEditors] = useState([])
   const [liveComps, setLiveComps] = useState([])
+  const [session, setSession] = useState(null)
+  const [profileId, setProfileId] = useState(() => window.location.hash.startsWith('#agent/') ? window.location.hash.slice(7) : null)
 
-  useEffect(() => {
+  const refresh = () => {
     fetchAgents().then(setLiveAgents).catch(() => {})
     fetchEditors().then(setLiveEditors).catch(() => {})
     fetchCompetitions().then(setLiveComps).catch(() => {})
+  }
+
+  useEffect(() => {
+    refresh()
+    supabase.auth.getSession().then(({ data }) => setSession(data.session))
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s))
+    const onHash = () => setProfileId(window.location.hash.startsWith('#agent/') ? window.location.hash.slice(7) : null)
+    window.addEventListener('hashchange', onHash)
+    return () => { sub.subscription.unsubscribe(); window.removeEventListener('hashchange', onHash) }
   }, [])
+
+  const openProfile = (id) => { window.location.hash = `agent/${id}` }
+  const closeProfile = () => { window.location.hash = ''; setProfileId(null) }
 
   const reps = liveAgents.length ? liveAgents : dummyAgents
   const editors = liveEditors.length ? liveEditors : dummyEditors
@@ -618,7 +804,10 @@ export default function App() {
     ['scripts', 'Scripts'],
     ['plan', 'Game plan'],
     ['campaigns', 'Campaigns'],
+    ['admin', 'Admin'],
   ]
+
+  const profileRecord = profileId ? directory.find((a) => a.id === profileId) : null
 
   return (
     <div className="min-h-screen font-sans">
@@ -649,12 +838,19 @@ export default function App() {
         </div>
       </nav>
 
-      {page === 'home' && <Home go={setPage} />}
-      {page === 'agents' && <Agents directory={directory} />}
-      {page === 'competitions' && <Competitions comps={comps} />}
-      {page === 'scripts' && <Scripts scripts={scripts} setScripts={setScripts} />}
-      {page === 'plan' && <GamePlan scripts={scripts} go={setPage} reps={reps} editors={editors} comps={comps} />}
-      {page === 'campaigns' && <Campaigns scripts={scripts} campaigns={campaigns} setCampaigns={setCampaigns} reps={reps} />}
+      {profileId ? (
+        <Profile record={profileRecord} back={closeProfile} />
+      ) : (
+        <>
+          {page === 'home' && <Home go={setPage} />}
+          {page === 'agents' && <Agents directory={directory} openProfile={openProfile} />}
+          {page === 'competitions' && <Competitions comps={comps} />}
+          {page === 'scripts' && <Scripts scripts={scripts} setScripts={setScripts} />}
+          {page === 'plan' && <GamePlan scripts={scripts} go={setPage} reps={reps} editors={editors} comps={comps} />}
+          {page === 'campaigns' && <Campaigns scripts={scripts} campaigns={campaigns} setCampaigns={setCampaigns} reps={reps} />}
+          {page === 'admin' && <Admin session={session} reps={reps} refresh={refresh} />}
+        </>
+      )}
 
       <footer className="border-t border-edge mt-16">
         <div className="max-w-4xl mx-auto px-6 py-6 flex justify-between items-center">
