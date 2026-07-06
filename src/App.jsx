@@ -3,6 +3,13 @@ import { dummyAgents, dummyEditors, dummyProdcos, dummyCompetitions } from './da
 
 const directory = [...dummyAgents, ...dummyEditors, ...dummyProdcos]
 const TYPES = ['All', 'Agent', 'Manager', 'Script editor', 'Production company']
+const TYPE_LABELS = {
+  All: 'All types',
+  Agent: 'Agents',
+  Manager: 'Managers',
+  'Script editor': 'Script editors',
+  'Production company': 'Production companies',
+}
 
 // ---------- helpers ----------
 const load = (key, fallback) => {
@@ -125,7 +132,7 @@ function Agents({ scripts }) {
         />
         <select value={role} onChange={(e) => setRole(e.target.value)} className="px-3 py-2.5 bg-panel text-body rounded-lg border border-edge outline-none">
           {TYPES.map((t) => (
-            <option key={t} value={t}>{t === 'All' ? 'All types' : t + 's'}</option>
+            <option key={t} value={t}>{TYPE_LABELS[t]}</option>
           ))}
         </select>
         <label className="flex items-center gap-2 text-dim text-sm px-2 cursor-pointer select-none">
