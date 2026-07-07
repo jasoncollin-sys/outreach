@@ -940,7 +940,7 @@ export default function App() {
       <footer className="border-t border-edge mt-16">
         <div className="max-w-4xl mx-auto px-6 py-6 flex justify-between items-center">
           <p className="font-slug text-dim text-xs tracking-widest">FADE OUT.</p>
-          <p className="text-dim text-xs">OUTREACH · demo build</p>
+          <p className="text-dim text-xs">OUTREACH · demo build · Built with Claude</p>
         </div>
       </footer>
     </div>
