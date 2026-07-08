@@ -1,15 +1,8 @@
 import { useState, useEffect } from 'react'
-import { dummyAgents, dummyEditors, dummyProdcos, dummyCompetitions } from './data/dummyAgents.js'
-import { fetchAgents, fetchEditors, fetchCompetitions, supabase, saveAgent, fetchAgentRaw, bulkUpsertAgents } from './lib/db.js'
-
-const TYPES = ['All', 'Agent', 'Manager', 'Script editor', 'Production company']
-const TYPE_LABELS = {
-  All: 'All types',
-  Agent: 'Agents',
-  Manager: 'Managers',
-  'Script editor': 'Script editors',
-  'Production company': 'Production companies',
-}
+import {
+  fetchAgencies, fetchAgents, fetchEditors, fetchCourses, fetchCompetitions,
+  supabase, saveAgent, fetchAgentRaw, fetchAgencyOptions, bulkUpsert,
+} from './lib/db.js'
 
 // ---------- helpers ----------
 const load = (key, fallback) => {
@@ -27,12 +20,13 @@ const save = (key, value) => {
 }
 const today = () => new Date().toISOString().slice(0, 10)
 const uid = () => Math.random().toString(36).slice(2, 9)
+const nameOf = (r) => (r.firstName ? `${r.firstName} ${r.lastName}`.trim() : r.name || r.agency || '')
 
 const POSITIVE = ['Requested pages', 'Requested full', 'Meeting', 'Signed']
 const RESPONSES = ['No response yet', 'Pass', 'Pass with feedback', ...POSITIVE]
 
 function tierAgent(agent, script) {
-  const genreMatch = script?.genre && agent.genres.includes(script.genre)
+  const genreMatch = script?.genre && agent.genres?.includes(script.genre)
   if (agent.acceptsUnsolicited === 'Yes' && genreMatch) return 'Primary'
   if (agent.acceptsUnsolicited === 'Yes' || agent.acceptsUnsolicited === 'Query letter first') return 'Secondary'
   return 'Research'
@@ -60,16 +54,119 @@ function TierBadge({ tier }) {
   )
 }
 
+const KIND_LABEL = {
+  agency: 'Agency', person: 'Person', editor: 'Editor', course: 'Course', competition: 'Competition',
+}
+function KindBadge({ kind }) {
+  return (
+    <span className="text-xs font-slug uppercase tracking-wider px-2.5 py-0.5 rounded border border-accent/40 text-accentHi bg-accent/10 whitespace-nowrap">
+      {KIND_LABEL[kind] || kind}
+    </span>
+  )
+}
+
+function VerifiedBadge({ record }) {
+  if (record.verified) {
+    return (
+      <span className="text-xs px-2.5 py-1 rounded-full border border-accent/40 text-accentHi bg-accent/10 whitespace-nowrap">
+        Verified{record.lastVerified ? ` ${record.lastVerified}` : ''}
+      </span>
+    )
+  }
+  return (
+    <span className="text-xs px-2.5 py-1 rounded-full border border-edge text-dim whitespace-nowrap">
+      {record.recordStatus || 'Needs verification'}
+    </span>
+  )
+}
+
 function Empty({ children }) {
   return <p className="text-dim text-sm border border-dashed border-edge rounded-lg p-6 text-center">{children}</p>
+}
+
+// Uniform empty-state for a single profile field — never hide a field, show this.
+function NotVerified({ label = 'Not yet verified' }) {
+  return (
+    <span className="inline-block text-dim/60 italic text-xs border border-dashed border-edge rounded px-2 py-0.5">
+      {label}
+    </span>
+  )
+}
+
+// A profile field row. `filled` decides whether to show the value or the empty state.
+function Field({ label, filled, children }) {
+  return (
+    <div>
+      <dt className="text-dim uppercase font-slug text-xs tracking-wider mb-1">{label}</dt>
+      <dd className="text-body text-sm leading-relaxed">{filled ? children : <NotVerified />}</dd>
+    </div>
+  )
+}
+
+const TextField = ({ label, value }) => <Field label={label} filled={!!(value && String(value).trim())}>{value}</Field>
+
+const GenreField = ({ label, genres }) => (
+  <Field label={label} filled={!!(genres && genres.length)}>{genres?.join(', ')}</Field>
+)
+
+const LinkField = ({ label, url }) => (
+  <Field label={label} filled={!!(url && url.trim())}>
+    <a href={url} target="_blank" rel="noreferrer" className="text-accentHi underline break-all">{url}</a>
+  </Field>
+)
+
+function ClientsField({ label, value }) {
+  const items = (value || '').split(/[;\n]/).map((c) => c.trim()).filter(Boolean)
+  return (
+    <Field label={label} filled={items.length > 0}>
+      <ul className="list-disc list-inside space-y-0.5">
+        {items.map((cl, i) => <li key={i}>{cl}</li>)}
+      </ul>
+    </Field>
+  )
+}
+
+function PressField({ label, value }) {
+  const lines = (value || '').split('\n').map((l) => l.trim()).filter(Boolean)
+  return (
+    <Field label={label} filled={lines.length > 0}>
+      <div className="space-y-1">
+        {lines.map((line, i) => {
+          const m = line.match(/https?:\/\/\S+/)
+          const url = m ? m[0] : null
+          const text = url ? line.replace(url, '').trim() : line
+          return (
+            <p key={i}>
+              {text}
+              {url && (<> {' '}<a href={url} target="_blank" rel="noreferrer" className="text-accentHi underline">read</a></>)}
+            </p>
+          )
+        })}
+      </div>
+    </Field>
+  )
+}
+
+function ContactField({ record }) {
+  const { submissionEmail, submissionPageUrl } = record
+  const filled = !!(submissionEmail || submissionPageUrl)
+  return (
+    <Field label="Published contact" filled={filled}>
+      {submissionEmail}
+      {submissionEmail && submissionPageUrl ? ' · ' : ''}
+      {submissionPageUrl && (
+        <a href={submissionPageUrl} target="_blank" rel="noreferrer" className="text-accentHi underline">submission page</a>
+      )}
+    </Field>
+  )
 }
 
 // ---------- screens ----------
 function Home({ go }) {
   const steps = [
-    ['01', 'Ready the script', 'Script editors in the directory. Blind coverage — coming later.'],
+    ['01', 'Ready the script', 'Script editors and courses in the directory. Blind coverage — coming later.'],
     ['02', 'Prove it', 'Competition list live. Matching in your Game plan.'],
-    ['03', 'Get represented', 'Verified UK managers and agents. Start here.'],
+    ['03', 'Get represented', 'Verified UK agencies and agents. Start here.'],
     ['04', 'Run the campaign', 'Tiered targets, drafted queries, tracked responses.'],
   ]
   return (
@@ -81,8 +178,8 @@ function Home({ go }) {
         <span className="text-accent">Now what?</span>
       </h1>
       <p className="text-dim text-lg mb-10 max-w-xl">
-        OUTREACH is the path from finished screenplay to represented writer: a verified database of UK agents
-        and managers, and a campaign builder that turns "I should query people" into a tracked, systematic push.
+        OUTREACH is the path from finished screenplay to represented writer: a verified database of UK agencies,
+        agents and courses, and a campaign builder that turns "I should query people" into a tracked, systematic push.
       </p>
       <div className="grid sm:grid-cols-2 gap-4 mb-10">
         {steps.map(([n, title, sub]) => (
@@ -93,95 +190,130 @@ function Home({ go }) {
           </div>
         ))}
       </div>
-      <button onClick={() => go('agents')} className="px-6 py-3 bg-accent hover:bg-accentHi transition rounded-lg text-white font-medium">
+      <button onClick={() => go('directory')} className="px-6 py-3 bg-accent hover:bg-accentHi transition rounded-lg text-white font-medium">
         Browse the database
       </button>
     </div>
   )
 }
 
-function Agents({ directory, openProfile }) {
-  const [q, setQ] = useState('')
-  const [role, setRole] = useState('All')
-  const [size, setSize] = useState('All')
-  const [openOnly, setOpenOnly] = useState(false)
+// A single clickable row in any directory list.
+function DirRow({ onClick, title, sub, pill, pillOpen }) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-full text-left bg-panel/60 border border-edge rounded-lg p-4 hover:border-accent/50 transition flex items-center justify-between gap-4"
+    >
+      <div>
+        <p className="text-body font-medium">{title}</p>
+        {sub && <p className="text-dim text-sm mt-0.5">{sub}</p>}
+      </div>
+      {pill && (
+        <span className={`text-xs px-2.5 py-1 rounded-full border whitespace-nowrap ${pillOpen ? 'border-accent/40 text-accentHi bg-accent/10' : 'border-edge text-dim'}`}>
+          {pill}
+        </span>
+      )}
+    </button>
+  )
+}
 
-  const list = directory.filter((a) => {
-    const text = `${a.firstName} ${a.lastName} ${a.agency}`.toLowerCase()
-    if (q && !text.includes(q.toLowerCase())) return false
-    if (role !== 'All' && a.role !== role) return false
-    if (size !== 'All' && a.agencySize !== size) return false
-    if (openOnly && a.acceptsUnsolicited !== 'Yes') return false
-    return true
-  })
+const DIR_TABS = [
+  ['agencies', 'Agencies'],
+  ['people', 'People'],
+  ['editors', 'Editors'],
+  ['courses', 'Courses'],
+  ['competitions', 'Competitions'],
+]
+
+function Directory({ agencies, people, editors, courses, comps, openProfile }) {
+  const [tab, setTab] = useState('agencies')
+  const [q, setQ] = useState('')
+  const s = q.trim().toLowerCase()
+  const match = (text) => !s || text.toLowerCase().includes(s)
+
+  const counts = {
+    agencies: agencies.length, people: people.length, editors: editors.length,
+    courses: courses.length, competitions: comps.length,
+  }
+
+  let list = null
+  if (tab === 'agencies') {
+    const rows = agencies.filter((a) => match(`${a.name} ${a.genres.join(' ')}`))
+    list = rows.length === 0 ? <Empty>No agencies yet.</Empty> : rows.map((a) => (
+      <DirRow key={a.id} onClick={() => openProfile('agency', a.id)}
+        title={a.name}
+        sub={[a.agencySize, a.genres.join(', ')].filter(Boolean).join(' · ')}
+        pill={a.acceptsUnsolicited === 'Yes' ? 'Open to unsolicited' : (a.acceptsUnsolicited || 'Openness unknown')}
+        pillOpen={a.acceptsUnsolicited === 'Yes'} />
+    ))
+  } else if (tab === 'people') {
+    const rows = people.filter((p) => match(`${p.firstName} ${p.lastName} ${p.agency}`))
+    list = rows.length === 0 ? <Empty>No people yet.</Empty> : rows.map((p) => (
+      <DirRow key={p.id} onClick={() => openProfile('person', p.id)}
+        title={<>{p.firstName} {p.lastName}<span className="text-dim font-normal"> · {p.agency}</span></>}
+        sub={[p.role, p.genres.join(', ')].filter(Boolean).join(' · ')}
+        pill={p.acceptsUnsolicited === 'Yes' ? 'Open to unsolicited' : (p.acceptsUnsolicited || 'Openness unknown')}
+        pillOpen={p.acceptsUnsolicited === 'Yes'} />
+    ))
+  } else if (tab === 'editors') {
+    const rows = editors.filter((e) => match(`${e.name} ${e.company} ${e.genres.join(' ')}`))
+    list = rows.length === 0 ? <Empty>No editors yet.</Empty> : rows.map((e) => (
+      <DirRow key={e.id} onClick={() => openProfile('editor', e.id)}
+        title={<>{e.name}{e.company && <span className="text-dim font-normal"> · {e.company}</span>}</>}
+        sub={[e.genres.join(', '), e.turnaround].filter(Boolean).join(' · ')} />
+    ))
+  } else if (tab === 'courses') {
+    const rows = courses.filter((c) => match(`${c.courseName} ${c.provider} ${c.format}`))
+    list = rows.length === 0 ? <Empty>No courses yet.</Empty> : rows.map((c) => (
+      <DirRow key={c.id} onClick={() => openProfile('course', c.id)}
+        title={<>{c.courseName || c.provider}{c.provider && c.courseName && <span className="text-dim font-normal"> · {c.provider}</span>}</>}
+        sub={[c.format, c.duration, c.cost].filter(Boolean).join(' · ')} />
+    ))
+  } else if (tab === 'competitions') {
+    const rows = [...comps].sort((a, b) => String(a.deadline).localeCompare(String(b.deadline)))
+      .filter((c) => match(`${c.name} ${c.genres.join(' ')}`))
+    list = rows.length === 0 ? <Empty>No competitions yet.</Empty> : rows.map((c) => (
+      <DirRow key={c.id} onClick={() => openProfile('competition', c.id)}
+        title={c.name}
+        sub={[c.deadline && `Deadline ${c.deadline}`, c.fee && `Entry ${c.fee}`].filter(Boolean).join(' · ')}
+        pill={`${c.credibility} credibility`}
+        pillOpen={c.credibility === 'High'} />
+    ))
+  }
+
+  const total = agencies.length + people.length + editors.length + courses.length + comps.length
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-10">
       <Slug scene="THE DIRECTORY" />
-      <h2 className="text-3xl font-semibold text-body mb-1">{directory.length} listings across the industry</h2>
-      <p className="text-dim text-sm mb-8">
+      <h2 className="text-3xl font-semibold text-body mb-1">{total} listings across the industry</h2>
+      <p className="text-dim text-sm mb-6">
         Records marked verified are checked against each organisation's own website, with a source and
-        last-checked date. Demo placeholders are labelled (demo).
+        last-checked date.
       </p>
 
-      <div className="flex flex-col sm:flex-row gap-3 mb-8">
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Search name or agency"
-          className="flex-1 px-4 py-2.5 bg-panel text-body rounded-lg border border-edge focus:border-accent outline-none placeholder:text-dim/60"
-        />
-        <select value={role} onChange={(e) => setRole(e.target.value)} className="px-3 py-2.5 bg-panel text-body rounded-lg border border-edge outline-none">
-          {TYPES.map((t) => (
-            <option key={t} value={t}>{TYPE_LABELS[t]}</option>
-          ))}
-        </select>
-        <select value={size} onChange={(e) => setSize(e.target.value)} className="px-3 py-2.5 bg-panel text-body rounded-lg border border-edge outline-none">
-          <option value="All">All sizes</option>
-          <option>Boutique</option>
-          <option>Mid</option>
-          <option>Large</option>
-        </select>
-        <label className="flex items-center gap-2 text-dim text-sm px-2 cursor-pointer select-none">
-          <input type="checkbox" checked={openOnly} onChange={(e) => setOpenOnly(e.target.checked)} className="accent-[#F2620F]" />
-          Open to unsolicited
-        </label>
-      </div>
-
-      <div className="space-y-3">
-        {list.length === 0 && <Empty>No matches. Try clearing the filters.</Empty>}
-        {list.map((a) => (
-          <button
-            key={a.id}
-            onClick={() => openProfile(a.id)}
-            className="w-full text-left bg-panel/60 border border-edge rounded-lg p-4 hover:border-accent/50 transition flex items-center justify-between gap-4"
-          >
-            <div>
-              <p className="text-body font-medium">
-                {a.firstName ? `${a.firstName} ${a.lastName}` : a.agency}
-                {a.firstName && <span className="text-dim font-normal"> · {a.agency}</span>}
-              </p>
-              <p className="text-dim text-sm mt-0.5">
-                {a.role} · {a.agencySize} · {a.genres.join(', ')}
-              </p>
-            </div>
-            <span
-              className={`text-xs px-2.5 py-1 rounded-full border whitespace-nowrap ${
-                a.acceptsUnsolicited === 'Yes'
-                  ? 'border-accent/40 text-accentHi bg-accent/10'
-                  : 'border-edge text-dim'
-              }`}
-            >
-              {a.acceptsUnsolicited === 'Yes' ? 'Open to unsolicited' : a.acceptsUnsolicited}
-            </span>
+      <div className="flex flex-wrap gap-2 mb-6">
+        {DIR_TABS.map(([id, label]) => (
+          <button key={id} onClick={() => setTab(id)}
+            className={`text-sm px-3.5 py-1.5 rounded-lg border transition ${tab === id ? 'border-accent/50 text-accentHi bg-accent/10' : 'border-edge text-dim hover:text-body'}`}>
+            {label} <span className="text-dim/70">{counts[id]}</span>
           </button>
         ))}
       </div>
+
+      <input
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Search within this view"
+        className="w-full px-4 py-2.5 bg-panel text-body rounded-lg border border-edge focus:border-accent outline-none placeholder:text-dim/60 mb-6"
+      />
+
+      <div className="space-y-3">{list}</div>
     </div>
   )
 }
 
-function Profile({ record, back }) {
+function Profile({ record, kind, people, openProfile, back }) {
   if (!record) {
     return (
       <div className="max-w-3xl mx-auto px-6 py-10">
@@ -190,94 +322,125 @@ function Profile({ record, back }) {
       </div>
     )
   }
-  const a = record
-  const name = a.firstName ? `${a.firstName} ${a.lastName}` : a.agency
-  const Field = ({ label, children }) =>
-    children ? (
-      <div>
-        <dt className="text-dim uppercase font-slug text-xs tracking-wider mb-1">{label}</dt>
-        <dd className="text-body text-sm leading-relaxed">{children}</dd>
-      </div>
-    ) : null
+
+  let title, subtitle, body
+  if (kind === 'agency') {
+    const roster = people.filter((p) => p.agencyId && p.agencyId === record.id)
+    title = record.name
+    subtitle = [record.role || 'Agency', record.agencySize].filter(Boolean).join(' · ')
+    body = (
+      <>
+        <TextField label="Bio" value={record.bio} />
+        <TextField label="Openness" value={record.acceptsUnsolicited} />
+        <TextField label="Submission route" value={record.submissionPolicy} />
+        <ContactField record={record} />
+        <GenreField label="Areas of interest" genres={record.genres} />
+        <ClientsField label="Clients & roster" value={record.notableClients} />
+        <TextField label="Intelligence" value={record.recentDeals} />
+        <TextField label="AI policy" value={record.aiPolicy} />
+        <PressField label="In the press" value={record.press} />
+        <LinkField label="Website" url={record.website} />
+        <Field label="People at this agency" filled={roster.length > 0}>
+          <ul className="space-y-1">
+            {roster.map((p) => (
+              <li key={p.id}>
+                <button onClick={() => openProfile('person', p.id)} className="text-accentHi underline">
+                  {p.firstName} {p.lastName}
+                </button>
+                <span className="text-dim"> · {p.role}</span>
+              </li>
+            ))}
+          </ul>
+        </Field>
+        <LinkField label="Source" url={record.sourceUrl} />
+      </>
+    )
+  } else if (kind === 'person') {
+    title = `${record.firstName} ${record.lastName}`.trim()
+    subtitle = [record.agency, record.role, record.agencySize].filter(Boolean).join(' · ')
+    body = (
+      <>
+        <Field label="Agency" filled={!!record.agency}>
+          {record.agencyId ? (
+            <button onClick={() => openProfile('agency', record.agencyId)} className="text-accentHi underline">{record.agency}</button>
+          ) : record.agency}
+        </Field>
+        <TextField label="Bio" value={record.bio} />
+        <TextField label="Openness" value={record.acceptsUnsolicited} />
+        <TextField label="Submission route" value={record.submissionPolicy} />
+        <ContactField record={record} />
+        <GenreField label="Areas of interest" genres={record.genres} />
+        <ClientsField label="Clients" value={record.notableClients} />
+        <TextField label="Intelligence" value={record.recentDeals} />
+        <TextField label="AI policy" value={record.aiPolicy} />
+        <PressField label="In the press" value={record.press} />
+        <LinkField label="Website" url={record.website} />
+        <LinkField label="Source" url={record.sourceUrl} />
+      </>
+    )
+  } else if (kind === 'editor') {
+    title = record.name
+    subtitle = [record.company, 'Script editor'].filter(Boolean).join(' · ')
+    body = (
+      <>
+        <TextField label="Services" value={record.services} />
+        <TextField label="Rates" value={record.ratesPublished} />
+        <TextField label="Turnaround" value={record.turnaround} />
+        <GenreField label="Genres" genres={record.genres} />
+        <TextField label="Credits" value={record.credits} />
+        <LinkField label="Website" url={record.website} />
+        <LinkField label="Source" url={record.sourceUrl} />
+      </>
+    )
+  } else if (kind === 'course') {
+    title = record.courseName || record.provider
+    subtitle = [record.provider, record.format].filter(Boolean).join(' · ')
+    body = (
+      <>
+        <TextField label="Provider" value={record.provider} />
+        <TextField label="Format" value={record.format} />
+        <TextField label="Duration" value={record.duration} />
+        <TextField label="Cost" value={record.cost} />
+        <TextField label="Application route" value={record.applicationRoute} />
+        <TextField label="Notable alumni" value={record.notableAlumni} />
+        <LinkField label="Website" url={record.website} />
+        <LinkField label="Source" url={record.sourceUrl} />
+      </>
+    )
+  } else if (kind === 'competition') {
+    title = record.name
+    subtitle = 'Competition'
+    body = (
+      <>
+        <TextField label="Deadline" value={record.deadline} />
+        <TextField label="Entry fee" value={record.fee} />
+        <GenreField label="Genres" genres={record.genres} />
+        <TextField label="Credibility" value={record.credibility} />
+        <TextField label="Why it carries weight" value={record.note} />
+      </>
+    )
+  }
+
+  const hasVerification = kind !== 'competition'
+
   return (
     <div className="max-w-3xl mx-auto px-6 py-10">
       <button onClick={back} className="text-dim hover:text-body text-sm mb-6">← Directory</button>
-      <Slug scene={`PROFILE — ${name.toUpperCase()}`} />
+      <Slug scene={`PROFILE — ${(title || '').toUpperCase()}`} />
       <div className="flex items-start justify-between gap-4 mb-2">
-        <h2 className="text-3xl font-semibold text-body">{name}</h2>
-        {a.verified ? (
-          <span className="text-xs px-2.5 py-1 rounded-full border border-accent/40 text-accentHi bg-accent/10 whitespace-nowrap mt-2">Verified {a.lastVerified}</span>
-        ) : (
-          <span className="text-xs px-2.5 py-1 rounded-full border border-edge text-dim whitespace-nowrap mt-2">{a.live ? 'Needs verification' : 'Demo record'}</span>
-        )}
+        <h2 className="text-3xl font-semibold text-body">{title}</h2>
+        <div className="flex flex-col items-end gap-2 mt-1">
+          <KindBadge kind={kind} />
+          {hasVerification && <VerifiedBadge record={record} />}
+        </div>
       </div>
-      <p className="text-dim mb-8">
-        {a.firstName ? `${a.agency} · ` : ''}{a.role}{a.agencySize ? ` · ${a.agencySize}` : ''}
-      </p>
+      {subtitle && <p className="text-dim mb-8">{subtitle}</p>}
 
-      <dl className="space-y-5 mb-10">
-        <Field label="Bio">{a.bio}</Field>
-        <Field label="Openness">{a.acceptsUnsolicited}</Field>
-        <Field label="Submission route">{a.submissionPolicy}</Field>
-        <Field label="Areas of interest">{a.genres?.length ? a.genres.join(', ') : null}</Field>
-        {a.notableClients?.length && a.notableClients.join('').trim() ? (
-          <div>
-            <dt className="text-dim uppercase font-slug text-xs tracking-wider mb-1">Clients</dt>
-            <dd className="text-body text-sm leading-relaxed">
-              <ul className="list-disc list-inside space-y-0.5">
-                {a.notableClients.join('; ').split(/[;\n]/).map((cl) => cl.trim()).filter(Boolean).map((cl, i) => (
-                  <li key={i}>{cl}</li>
-                ))}
-              </ul>
-            </dd>
-          </div>
-        ) : null}
-        {a.press && a.press.trim() ? (
-          <div>
-            <dt className="text-dim uppercase font-slug text-xs tracking-wider mb-1">In the press</dt>
-            <dd className="text-body text-sm leading-relaxed space-y-1">
-              {a.press.split('\n').map((line) => line.trim()).filter(Boolean).map((line, i) => {
-                const m = line.match(/https?:\/\/\S+/)
-                const url = m ? m[0] : null
-                const text = url ? line.replace(url, '').trim() : line
-                return (
-                  <p key={i}>
-                    {text}
-                    {url && (
-                      <>
-                        {' '}
-                        <a href={url} target="_blank" rel="noreferrer" className="text-accentHi underline">read</a>
-                      </>
-                    )}
-                  </p>
-                )
-              })}
-            </dd>
-          </div>
-        ) : null}
-        <Field label="Intelligence">{a.recentDeals || a.recent_deals_notes}</Field>
-        <Field label="AI policy">{a.aiPolicy}</Field>
-        <Field label="Published contact">
-          {a.submissionEmail || a.submissionPageUrl ? (
-            <>
-              {a.submissionEmail}
-              {a.submissionEmail && a.submissionPageUrl ? ' · ' : ''}
-              {a.submissionPageUrl && (
-                <a href={a.submissionPageUrl} target="_blank" rel="noreferrer" className="text-accentHi underline">submission page</a>
-              )}
-            </>
-          ) : null}
-        </Field>
-        <Field label="Website">{a.website}</Field>
-        <Field label="Source">
-          {a.sourceUrl ? (
-            <a href={a.sourceUrl} target="_blank" rel="noreferrer" className="text-accentHi underline">{a.sourceUrl}</a>
-          ) : null}
-        </Field>
-      </dl>
+      <dl className="space-y-5 mb-10">{body}</dl>
+
       <p className="text-dim text-xs">
-        Spotted something out of date? The live product will let you report a change on any record — for now,
-        every record carries its source so you can check the primary yourself.
+        Every field is shown even when empty, so you can see exactly what is and isn't yet verified. Records carry
+        their source so you can check the primary yourself.
       </p>
     </div>
   )
@@ -358,7 +521,7 @@ function Campaigns({ scripts, campaigns, setCampaigns, reps }) {
   const create = (script) => {
     const agents = reps.map((a) => ({
       agentId: a.id,
-      name: `${a.firstName} ${a.lastName}`,
+      name: nameOf(a),
       agency: a.agency,
       tier: tierAgent(a, script),
       sentDate: null,
@@ -457,7 +620,7 @@ function Campaigns({ scripts, campaigns, setCampaigns, reps }) {
           </div>
         ))}
         <p className="text-dim text-xs">
-          In the live version, "Draft email" appears on each row — AI-drafted from your logline and the agent's
+          In the live version, "Draft email" appears on each row — AI-drafted from your logline and the target's
           published tastes, always edited by you before sending.
         </p>
       </div>
@@ -513,41 +676,6 @@ function Campaigns({ scripts, campaigns, setCampaigns, reps }) {
             ))}
           </div>
         )}
-      </div>
-    </div>
-  )
-}
-
-function Competitions({ comps }) {
-  const sorted = [...comps].sort((a, b) => String(a.deadline).localeCompare(String(b.deadline)))
-  const credStyle = {
-    High: 'border-accent/40 text-accentHi bg-accent/10',
-    Medium: 'border-edge text-dim',
-    Low: 'border-edge border-dashed text-dim/70',
-  }
-  return (
-    <div className="max-w-3xl mx-auto px-6 py-10">
-      <Slug scene="COMPETITIONS" />
-      <h2 className="text-3xl font-semibold text-body mb-1">Competitions</h2>
-      <p className="text-dim text-sm mb-8">
-        Demo listings, sorted by deadline. The live version tracks real deadlines, fees, and which placements
-        actually carry weight with reps.
-      </p>
-      <div className="space-y-3">
-        {sorted.map((c) => (
-          <div key={c.id} className="bg-panel/60 border border-edge rounded-lg p-4">
-            <div className="flex justify-between items-start gap-4 mb-1.5">
-              <p className="text-body font-medium">{c.name}</p>
-              <span className={`text-xs px-2.5 py-0.5 rounded-full border whitespace-nowrap ${credStyle[c.credibility]}`}>
-                {c.credibility} credibility
-              </span>
-            </div>
-            <p className="text-dim text-sm">
-              Deadline {c.deadline} · Entry {c.fee} · {c.genres.length > 4 ? 'All genres' : c.genres.join(', ')}
-            </p>
-            <p className="text-dim/80 text-sm mt-1 italic">{c.note}</p>
-          </div>
-        ))}
       </div>
     </div>
   )
@@ -610,24 +738,27 @@ function GamePlan({ scripts, go, reps, editors: allEditors, comps: allComps }) {
 
       <Section n="01" title="Get it match-fit" sub={`${editors.length} script editors work in ${script?.genre || 'your genre'}. Fresh eyes before anyone important reads it.`}>
         <div className="space-y-2">
+          {editors.length === 0 && <Empty>No matching editors yet.</Empty>}
           {editors.map((e) => (
-            <Row key={e.id} main={`${e.firstName} ${e.lastName} · ${e.agency}`} side={e.submissionPolicy.split(';')[0]} />
+            <Row key={e.id} main={`${e.name} · ${e.company}`} side={(e.submissionPolicy || '').split('·')[0]} />
           ))}
         </div>
       </Section>
 
       <Section n="02" title="Enter the right competitions" sub="Matched to genre, high-credibility first. Placements become query-letter ammunition.">
         <div className="space-y-2">
+          {comps.length === 0 && <Empty>No matching competitions yet.</Empty>}
           {comps.slice(0, 4).map((c) => (
             <Row key={c.id} main={c.name} side={`${c.deadline} · ${c.fee}`} />
           ))}
         </div>
       </Section>
 
-      <Section n="03" title="Query your primary targets" sub={`${reps_.length} reps are open to unsolicited ${script?.genre || ''} submissions — your first wave.`}>
+      <Section n="03" title="Query your primary targets" sub={`${reps_.length} targets are open to unsolicited ${script?.genre || ''} submissions — your first wave.`}>
         <div className="space-y-2">
+          {reps_.length === 0 && <Empty>No open primary targets for this genre yet.</Empty>}
           {reps_.slice(0, 5).map((a) => (
-            <Row key={a.id} main={`${a.firstName} ${a.lastName} · ${a.agency}`} side={a.role} />
+            <Row key={a.id} main={`${nameOf(a)}${a.firstName ? ` · ${a.agency}` : ''}`} side={a.role} />
           ))}
         </div>
       </Section>
@@ -643,15 +774,22 @@ function GamePlan({ scripts, go, reps, editors: allEditors, comps: allComps }) {
   )
 }
 
-
 const BLANK_AGENT = {
-  id: '', firstName: '', lastName: '', role: 'Agent', agency: '', agencySize: '',
+  id: '', firstName: '', lastName: '', role: 'Agent', agency: '', agencyId: '', agencySize: '',
   website: '', submissionEmail: '', submissionPageUrl: '', acceptsUnsolicited: '',
   submissionPolicy: '', genres: '', notableClients: '', recentDeals: '',
   sourceUrl: '', lastVerified: '', recordStatus: 'Needs verification', aiPolicy: '', bio: '', press: '',
 }
 
-function Admin({ session, reps, refresh }) {
+const BULK_TABLE_OPTIONS = [
+  ['agencies', 'Agencies'],
+  ['agents', 'People (agents)'],
+  ['editors', 'Editors'],
+  ['competitions', 'Competitions'],
+  ['courses', 'Courses'],
+]
+
+function Admin({ session, people, refresh }) {
   const [email, setEmail] = useState('')
   const [sent, setSent] = useState(false)
   const [form, setForm] = useState(BLANK_AGENT)
@@ -659,7 +797,13 @@ function Admin({ session, reps, refresh }) {
   const [mode, setMode] = useState('single')
   const [bulkText, setBulkText] = useState('')
   const [bulkRows, setBulkRows] = useState(null)
+  const [bulkTable, setBulkTable] = useState('agencies')
+  const [agencyOptions, setAgencyOptions] = useState([])
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
+
+  useEffect(() => {
+    if (session) fetchAgencyOptions().then(setAgencyOptions).catch(() => {})
+  }, [session])
 
   const signIn = async () => {
     const { error } = await supabase.auth.signInWithOtp({
@@ -676,7 +820,7 @@ function Admin({ session, reps, refresh }) {
       const r = await fetchAgentRaw(id)
       setForm({
         id: r.id, firstName: r.first_name || '', lastName: r.last_name || '', role: r.role || 'Agent',
-        agency: r.agency || '', agencySize: r.agency_size || '', website: r.website || '',
+        agency: r.agency || '', agencyId: r.agency_id || '', agencySize: r.agency_size || '', website: r.website || '',
         submissionEmail: r.submission_email || '', submissionPageUrl: r.submission_page_url || '',
         acceptsUnsolicited: r.accepts_unsolicited || '', submissionPolicy: r.submission_policy || '',
         genres: (r.genres || []).join(', '), notableClients: r.notable_clients || '',
@@ -685,6 +829,12 @@ function Admin({ session, reps, refresh }) {
         aiPolicy: r.ai_policy || '', bio: r.bio || '', press: r.press || '',
       })
     } catch { setStatus('Could not load that record.') }
+  }
+
+  // Picking an agency from the picker fills both the FK and the agency name.
+  const pickAgency = (id) => {
+    const opt = agencyOptions.find((o) => o.id === id)
+    setForm((f) => ({ ...f, agencyId: id, agency: opt ? opt.name : f.agency }))
   }
 
   const submit = async () => {
@@ -718,7 +868,7 @@ function Admin({ session, reps, refresh }) {
     )
   }
 
-  const nextId = 'AG-' + String(reps.filter((r) => r.live).length + 1).padStart(3, '0')
+  const nextId = 'AG-' + String(people.length + 1).padStart(3, '0')
   const inp = 'w-full px-3 py-2 bg-ink text-body rounded-lg border border-edge focus:border-accent outline-none placeholder:text-dim/50 text-sm'
   const lbl = 'text-dim text-xs uppercase font-slug tracking-wider mb-1 block'
 
@@ -726,27 +876,33 @@ function Admin({ session, reps, refresh }) {
     <div className="max-w-3xl mx-auto px-6 py-10">
       <div className="flex items-baseline justify-between mb-6">
         <div>
-          <Slug scene="ADMIN — AGENT RECORDS" />
+          <Slug scene="ADMIN — RECORDS" />
           <h2 className="text-3xl font-semibold text-body">Add / edit a record</h2>
         </div>
         <button onClick={() => supabase.auth.signOut()} className="text-dim hover:text-body text-sm">Sign out</button>
       </div>
 
       <div className="flex gap-2 mb-6">
-        <button onClick={() => setMode('single')} className={`text-sm px-4 py-1.5 rounded-lg border transition ${mode === 'single' ? 'border-accent/50 text-accentHi bg-accent/10' : 'border-edge text-dim hover:text-body'}`}>Single record</button>
+        <button onClick={() => setMode('single')} className={`text-sm px-4 py-1.5 rounded-lg border transition ${mode === 'single' ? 'border-accent/50 text-accentHi bg-accent/10' : 'border-edge text-dim hover:text-body'}`}>Single record (person)</button>
         <button onClick={() => setMode('bulk')} className={`text-sm px-4 py-1.5 rounded-lg border transition ${mode === 'bulk' ? 'border-accent/50 text-accentHi bg-accent/10' : 'border-edge text-dim hover:text-body'}`}>Bulk import</button>
       </div>
 
       {mode === 'bulk' ? (
         <div className="bg-panel/60 border border-edge rounded-xl p-5 space-y-4">
-          <p className="text-dim text-sm">Paste a JSON block of researched records (Claude produces these). Preview appears below before anything is saved.</p>
-          <textarea rows={10} className="w-full px-3 py-2 bg-ink text-body rounded-lg border border-edge focus:border-accent outline-none text-xs font-mono" value={bulkText} onChange={(e) => { setBulkText(e.target.value); setBulkRows(null); setStatus('') }} placeholder='[ {"id": "AG-020", "agency": "...", ...} ]' />
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="text-dim text-sm">Import into:</span>
+            <select value={bulkTable} onChange={(e) => { setBulkTable(e.target.value); setBulkRows(null); setStatus('') }} className="px-3 py-2 bg-ink text-body rounded-lg border border-edge outline-none text-sm">
+              {BULK_TABLE_OPTIONS.map(([id, label]) => (<option key={id} value={id}>{label}</option>))}
+            </select>
+          </div>
+          <p className="text-dim text-sm">Paste a JSON array of records (Claude produces these) using that table's column names. Preview appears below before anything is saved.</p>
+          <textarea rows={10} className="w-full px-3 py-2 bg-ink text-body rounded-lg border border-edge focus:border-accent outline-none text-xs font-mono" value={bulkText} onChange={(e) => { setBulkText(e.target.value); setBulkRows(null); setStatus('') }} placeholder='[ {"id": "CO-001", "provider": "...", ...} ]' />
           {!bulkRows ? (
             <button onClick={() => {
               try {
                 const rows = JSON.parse(bulkText)
                 if (!Array.isArray(rows) || !rows.length) throw new Error('Expected a JSON array of records')
-                for (const r of rows) if (!r.id || !r.agency) throw new Error('Every record needs id and agency')
+                for (const r of rows) if (!r.id) throw new Error('Every record needs an id')
                 setBulkRows(rows); setStatus('')
               } catch (e) { setStatus(`Error: ${e.message}`) }
             }} className="px-5 py-2 border border-accent/50 text-accentHi hover:bg-accent/10 rounded-lg text-sm transition">Preview</button>
@@ -754,15 +910,15 @@ function Admin({ session, reps, refresh }) {
             <div className="space-y-3">
               <div className="space-y-1">
                 {bulkRows.map((r) => (
-                  <p key={r.id} className="text-body text-sm">{r.id} · {r.first_name ? `${r.first_name} ${r.last_name || ''}` : r.agency} <span className="text-dim">· {r.record_status || 'Needs verification'}</span></p>
+                  <p key={r.id} className="text-body text-sm">{r.id} · {r.first_name ? `${r.first_name} ${r.last_name || ''}` : (r.name || r.course_name || r.agency || r.provider || '—')} <span className="text-dim">· {r.record_status || ''}</span></p>
                 ))}
               </div>
               <div className="flex gap-3">
                 <button onClick={async () => {
                   setStatus('Importing…')
-                  try { const n = await bulkUpsertAgents(bulkRows); setStatus(`Imported ${n} records. Live now.`); setBulkRows(null); setBulkText(''); refresh() }
+                  try { const n = await bulkUpsert(bulkTable, bulkRows); setStatus(`Imported ${n} records into ${bulkTable}. Live now.`); setBulkRows(null); setBulkText(''); refresh() }
                   catch (e) { setStatus(`Error: ${e.message}`) }
-                }} className="px-5 py-2 bg-accent hover:bg-accentHi rounded-lg text-white text-sm font-medium transition">Import {bulkRows.length} records</button>
+                }} className="px-5 py-2 bg-accent hover:bg-accentHi rounded-lg text-white text-sm font-medium transition">Import {bulkRows.length} into {bulkTable}</button>
                 <button onClick={() => setBulkRows(null)} className="px-4 py-2 text-dim hover:text-body text-sm">Cancel</button>
               </div>
             </div>
@@ -774,9 +930,9 @@ function Admin({ session, reps, refresh }) {
       <div className="flex items-center gap-3 mb-8 flex-wrap">
         <span className="text-dim text-sm">Edit existing:</span>
         <select onChange={(e) => loadExisting(e.target.value)} className="px-3 py-2 bg-panel text-body rounded-lg border border-edge outline-none text-sm">
-          <option value="">— new record —</option>
-          {reps.filter((r) => r.live).map((r) => (
-            <option key={r.id} value={r.id}>{r.id} · {r.firstName ? `${r.firstName} ${r.lastName}` : r.agency}</option>
+          <option value="">— new person —</option>
+          {people.map((r) => (
+            <option key={r.id} value={r.id}>{r.id} · {r.firstName} {r.lastName}</option>
           ))}
         </select>
         <span className="text-dim text-xs">next free id: {nextId}</span>
@@ -793,7 +949,12 @@ function Admin({ session, reps, refresh }) {
             </select></div>
         </div>
         <div className="grid sm:grid-cols-3 gap-3">
-          <div className="sm:col-span-2"><span className={lbl}>agency *</span><input className={inp} value={form.agency} onChange={set('agency')} /></div>
+          <div><span className={lbl}>agency (picker)</span>
+            <select className={inp} value={form.agencyId} onChange={(e) => pickAgency(e.target.value)}>
+              <option value="">— none / type below —</option>
+              {agencyOptions.map((o) => (<option key={o.id} value={o.id}>{o.name}</option>))}
+            </select></div>
+          <div><span className={lbl}>agency name *</span><input className={inp} value={form.agency} onChange={set('agency')} /></div>
           <div><span className={lbl}>size</span>
             <select className={inp} value={form.agencySize} onChange={set('agencySize')}>
               <option value="">—</option><option>Boutique</option><option>Mid</option><option>Large</option>
@@ -838,68 +999,80 @@ function Admin({ session, reps, refresh }) {
   )
 }
 
+// hash → { admin } or { kind, id } for a profile
+function parseHash() {
+  const h = window.location.hash.slice(1)
+  if (h === 'admin') return { admin: true, profile: null }
+  const [seg, id] = h.split('/')
+  const kindMap = { agency: 'agency', person: 'person', agent: 'person', editor: 'editor', course: 'course', competition: 'competition', comp: 'competition' }
+  if (id && kindMap[seg]) return { admin: false, profile: { kind: kindMap[seg], id } }
+  return { admin: false, profile: null }
+}
 
 export default function App() {
   const [page, setPage] = useState('home')
   const [scripts, setScriptsRaw] = useState(() => load('outreach_scripts', []))
   const [campaigns, setCampaignsRaw] = useState(() => load('outreach_campaigns', []))
-  const [liveAgents, setLiveAgents] = useState([])
-  const [liveEditors, setLiveEditors] = useState([])
-  const [liveComps, setLiveComps] = useState([])
+  const [agencies, setAgencies] = useState([])
+  const [people, setPeople] = useState([])
+  const [editors, setEditors] = useState([])
+  const [courses, setCourses] = useState([])
+  const [comps, setComps] = useState([])
   const [session, setSession] = useState(null)
-  const [profileId, setProfileId] = useState(() => window.location.hash.startsWith('#agent/') ? window.location.hash.slice(7) : null)
+  const [profile, setProfile] = useState(() => parseHash().profile)
 
   const refresh = () => {
-    fetchAgents().then(setLiveAgents).catch(() => {})
-    fetchEditors().then(setLiveEditors).catch(() => {})
-    fetchCompetitions().then(setLiveComps).catch(() => {})
+    fetchAgencies().then(setAgencies).catch(() => {})
+    fetchAgents().then(setPeople).catch(() => {})
+    fetchEditors().then(setEditors).catch(() => {})
+    fetchCourses().then(setCourses).catch(() => {})
+    fetchCompetitions().then(setComps).catch(() => {})
   }
 
   useEffect(() => {
     refresh()
     supabase.auth.getSession().then(({ data }) => setSession(data.session))
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s))
-    if (window.location.hash === '#admin') setPage('admin')
-    const onHash = () => {
-      setProfileId(window.location.hash.startsWith('#agent/') ? window.location.hash.slice(7) : null)
-      if (window.location.hash === '#admin') setPage('admin')
+    const applyHash = () => {
+      const { admin, profile: p } = parseHash()
+      setProfile(p)
+      if (admin) setPage('admin')
     }
-    window.addEventListener('hashchange', onHash)
-    return () => { sub.subscription.unsubscribe(); window.removeEventListener('hashchange', onHash) }
+    applyHash()
+    window.addEventListener('hashchange', applyHash)
+    return () => { sub.subscription.unsubscribe(); window.removeEventListener('hashchange', applyHash) }
   }, [])
 
-  const openProfile = (id) => { window.location.hash = `agent/${id}` }
-  const closeProfile = () => { window.location.hash = ''; setProfileId(null) }
-
-  const reps = liveAgents.length ? liveAgents : dummyAgents
-  const editors = liveEditors.length ? liveEditors : dummyEditors
-  const comps = liveComps.length ? liveComps : dummyCompetitions
-  const directory = [...reps, ...editors, ...dummyProdcos]
-  const liveMode = liveAgents.length > 0
+  const openProfile = (kind, id) => { window.location.hash = `${kind}/${id}` }
+  const closeProfile = () => { window.location.hash = ''; setProfile(null) }
 
   const setScripts = (v) => { setScriptsRaw(v); save('outreach_scripts', v) }
   const setCampaigns = (v) => { setCampaignsRaw(v); save('outreach_campaigns', v) }
 
-  useEffect(() => { window.scrollTo(0, 0) }, [page])
+  useEffect(() => { window.scrollTo(0, 0) }, [page, profile])
 
   const tabs = [
     ['home', 'Home'],
-    ['agents', 'Directory'],
-    ['competitions', 'Competitions'],
+    ['directory', 'Directory'],
     ['scripts', 'Scripts'],
     ['plan', 'Game plan'],
     ['campaigns', 'Campaigns'],
     ...(session ? [['admin', 'Admin']] : []),
   ]
 
-  const profileRecord = profileId ? directory.find((a) => a.id === profileId) : null
+  // Agencies and people are both query targets for the campaign builder.
+  const queryTargets = [...agencies, ...people]
+  const totalRecords = agencies.length + people.length + editors.length + courses.length + comps.length
+
+  const profileLists = { agency: agencies, person: people, editor: editors, course: courses, competition: comps }
+  const profileRecord = profile ? (profileLists[profile.kind] || []).find((r) => r.id === profile.id) : null
 
   return (
     <div className="min-h-screen font-sans">
       <div className="bg-accent text-white text-center text-xs font-slug tracking-widest uppercase py-1.5">
-        {liveMode
-          ? `Live database — ${liveAgents.length} verified-sourced agent records · other sections still demo data`
-          : 'Demo — all agent data on this site is fictional placeholder content'}
+        {totalRecords > 0
+          ? `Live database — ${agencies.length} agencies · ${people.length} people · verified against primary sources`
+          : 'OUTREACH — verified UK database for screenwriters'}
       </div>
 
       <nav className="border-b border-edge bg-ink/90 backdrop-blur sticky top-0 z-40">
@@ -913,7 +1086,7 @@ export default function App() {
                 key={id}
                 onClick={() => { closeProfile(); setPage(id) }}
                 className={`text-sm px-3 py-1.5 rounded-lg transition ${
-                  page === id ? 'text-accentHi bg-accent/10' : 'text-dim hover:text-body'
+                  page === id && !profile ? 'text-accentHi bg-accent/10' : 'text-dim hover:text-body'
                 }`}
               >
                 {label}
@@ -923,24 +1096,23 @@ export default function App() {
         </div>
       </nav>
 
-      {profileId ? (
-        <Profile record={profileRecord} back={closeProfile} />
+      {profile ? (
+        <Profile record={profileRecord} kind={profile.kind} people={people} openProfile={openProfile} back={closeProfile} />
       ) : (
         <>
           {page === 'home' && <Home go={setPage} />}
-          {page === 'agents' && <Agents directory={directory} openProfile={openProfile} />}
-          {page === 'competitions' && <Competitions comps={comps} />}
+          {page === 'directory' && <Directory agencies={agencies} people={people} editors={editors} courses={courses} comps={comps} openProfile={openProfile} />}
           {page === 'scripts' && <Scripts scripts={scripts} setScripts={setScripts} />}
-          {page === 'plan' && <GamePlan scripts={scripts} go={setPage} reps={reps} editors={editors} comps={comps} />}
-          {page === 'campaigns' && <Campaigns scripts={scripts} campaigns={campaigns} setCampaigns={setCampaigns} reps={reps} />}
-          {page === 'admin' && <Admin session={session} reps={reps} refresh={refresh} />}
+          {page === 'plan' && <GamePlan scripts={scripts} go={setPage} reps={queryTargets} editors={editors} comps={comps} />}
+          {page === 'campaigns' && <Campaigns scripts={scripts} campaigns={campaigns} setCampaigns={setCampaigns} reps={queryTargets} />}
+          {page === 'admin' && <Admin session={session} people={people} refresh={refresh} />}
         </>
       )}
 
       <footer className="border-t border-edge mt-16">
         <div className="max-w-4xl mx-auto px-6 py-6 flex justify-between items-center">
           <p className="font-slug text-dim text-xs tracking-widest">FADE OUT.</p>
-          <p className="text-dim text-xs">OUTREACH · demo build · Built with Claude</p>
+          <p className="text-dim text-xs">OUTREACH · Built with Claude</p>
         </div>
       </footer>
     </div>

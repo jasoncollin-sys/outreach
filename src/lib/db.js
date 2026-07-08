@@ -17,64 +17,129 @@ async function fetchTable(table) {
   return res.json()
 }
 
-export async function fetchAgents() {
-  const rows = await fetchTable('agents')
+// ---- Reads (public) ----
+
+// Agencies (agency-level records). kind: 'agency'.
+export async function fetchAgencies() {
+  const rows = await fetchTable('agencies')
   return rows.map((r) => ({
+    kind: 'agency',
     id: r.id,
-    firstName: r.first_name || '',
-    lastName: r.last_name || '',
-    role: r.role || 'Agent',
-    agency: r.agency,
+    name: r.name || '',
     agencySize: r.agency_size || '',
     website: r.website || '',
     submissionEmail: r.submission_email || '',
     submissionPageUrl: r.submission_page_url || '',
+    acceptsUnsolicited: r.accepts_unsolicited || '',
+    submissionPolicy: r.submission_policy || '',
     genres: r.genres || [],
-    acceptsUnsolicited: r.accepts_unsolicited || 'Unknown',
-    submissionPolicy: r.submission_policy || 'No published policy on record yet.',
-    notableClients: r.notable_clients ? [r.notable_clients] : [],
+    notableClients: r.notable_clients || '',
+    recentDeals: r.recent_deals_notes || '',
     aiPolicy: r.ai_policy || '',
-    sourceUrl: r.source_url || '',
-    lastVerified: r.last_verified || '',
-    verified: r.record_status === 'Verified',
     bio: r.bio || '',
     press: r.press || '',
-    live: true,
+    sourceUrl: r.source_url || '',
+    lastVerified: r.last_verified || '',
+    recordStatus: r.record_status || 'Needs verification',
+    verified: r.record_status === 'Verified',
+    // aliases so the shared list/campaign code can treat an agency as a target
+    firstName: '',
+    lastName: '',
+    agency: r.name || '',
+    role: 'Agency',
   }))
+}
+
+// People (individual agents / managers). kind: 'person'.
+// After the Structure Day split, `agents` is people-only; we still guard by
+// requiring a first name so the People view never shows a stray agency row.
+export async function fetchAgents() {
+  const rows = await fetchTable('agents')
+  return rows
+    .filter((r) => (r.first_name || '').trim() !== '')
+    .map((r) => ({
+      kind: 'person',
+      id: r.id,
+      firstName: r.first_name || '',
+      lastName: r.last_name || '',
+      role: r.role || 'Agent',
+      agency: r.agency || '',
+      agencyId: r.agency_id || '',
+      agencySize: r.agency_size || '',
+      website: r.website || '',
+      submissionEmail: r.submission_email || '',
+      submissionPageUrl: r.submission_page_url || '',
+      genres: r.genres || [],
+      acceptsUnsolicited: r.accepts_unsolicited || '',
+      submissionPolicy: r.submission_policy || '',
+      notableClients: r.notable_clients || '',
+      recentDeals: r.recent_deals_notes || '',
+      aiPolicy: r.ai_policy || '',
+      sourceUrl: r.source_url || '',
+      lastVerified: r.last_verified || '',
+      recordStatus: r.record_status || 'Needs verification',
+      verified: r.record_status === 'Verified',
+      bio: r.bio || '',
+      press: r.press || '',
+    }))
 }
 
 export async function fetchEditors() {
   const rows = await fetchTable('editors')
   return rows.map((r) => ({
+    kind: 'editor',
     id: r.id,
-    firstName: r.name || '',
-    lastName: '',
-    role: 'Script editor',
-    agency: r.company || '',
-    agencySize: 'Boutique',
-    website: r.website || '',
+    name: r.name || '',
+    company: r.company || '',
+    services: r.services || '',
+    ratesPublished: r.rates_published || '',
+    turnaround: r.turnaround || '',
     genres: r.genres || [],
-    acceptsUnsolicited: 'Yes',
-    submissionPolicy: [r.services, r.rates_published, r.turnaround].filter(Boolean).join(' · '),
-    notableClients: r.credits_notes ? [r.credits_notes] : [],
+    credits: r.credits_notes || '',
+    website: r.website || '',
     sourceUrl: r.source_url || '',
     lastVerified: r.last_verified || '',
+    recordStatus: r.record_status || 'Needs verification',
     verified: r.record_status === 'Verified',
-    live: true,
+    // aliases for shared code (game plan lists editors by name/agency)
+    firstName: r.name || '',
+    lastName: '',
+    agency: r.company || '',
+    submissionPolicy: [r.services, r.rates_published, r.turnaround].filter(Boolean).join(' · '),
+  }))
+}
+
+export async function fetchCourses() {
+  const rows = await fetchTable('courses')
+  return rows.map((r) => ({
+    kind: 'course',
+    id: r.id,
+    provider: r.provider || '',
+    courseName: r.course_name || '',
+    format: r.format || '',
+    duration: r.duration || '',
+    cost: r.cost || '',
+    applicationRoute: r.application_route || '',
+    notableAlumni: r.notable_alumni || '',
+    website: r.website || '',
+    sourceUrl: r.source_url || '',
+    lastVerified: r.last_verified || '',
+    recordStatus: r.record_status || 'Needs verification',
+    verified: r.record_status === 'Verified',
   }))
 }
 
 export async function fetchCompetitions() {
   const rows = await fetchTable('competitions')
   return rows.map((r) => ({
+    kind: 'competition',
     id: r.id,
-    name: r.name,
+    name: r.name || '',
     deadline: r.deadline || '',
     fee: r.fee || '',
     genres: r.genres || [],
     credibility: r.credibility || 'Medium',
     note: r.why_credible || '',
-    live: true,
   }))
 }
 
@@ -86,6 +151,7 @@ export async function saveAgent(form) {
     last_name: form.lastName.trim() || null,
     role: form.role || 'Agent',
     agency: form.agency.trim(),
+    agency_id: form.agencyId?.trim() || null,
     agency_size: form.agencySize || null,
     website: form.website.trim() || null,
     submission_email: form.submissionEmail.trim() || null,
@@ -113,8 +179,26 @@ export async function fetchAgentRaw(id) {
   return data
 }
 
-export async function bulkUpsertAgents(rows) {
-  const { error } = await supabase.from('agents').upsert(rows, { onConflict: 'id' })
+// Lightweight list of agencies for the admin agency picker (id + name only).
+export async function fetchAgencyOptions() {
+  const { data, error } = await supabase.from('agencies').select('id, name').order('name')
+  if (error) throw error
+  return data || []
+}
+
+// Generic bulk upsert used by the bulk importer's table selector.
+// Each table keys on its text `id` except `deals`, which has no natural key.
+const BULK_TABLES = {
+  agencies: 'id',
+  agents: 'id',
+  editors: 'id',
+  competitions: 'id',
+  courses: 'id',
+}
+
+export async function bulkUpsert(table, rows) {
+  if (!(table in BULK_TABLES)) throw new Error(`Unknown table: ${table}`)
+  const { error } = await supabase.from(table).upsert(rows, { onConflict: BULK_TABLES[table] })
   if (error) throw error
   return rows.length
 }
