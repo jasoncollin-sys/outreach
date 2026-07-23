@@ -218,6 +218,7 @@ function DirRow({ onClick, title, sub, pill, pillOpen }) {
 }
 
 const DIR_TABS = [
+  ['all', 'All'],
   ['agencies', 'Agencies'],
   ['people', 'People'],
   ['editors', 'Editors'],
@@ -226,62 +227,91 @@ const DIR_TABS = [
 ]
 
 function Directory({ agencies, people, editors, courses, comps, openProfile }) {
-  const [tab, setTab] = useState('agencies')
+  const [tab, setTab] = useState('all')
   const [q, setQ] = useState('')
   const s = q.trim().toLowerCase()
   const match = (text) => !s || text.toLowerCase().includes(s)
 
+  const total = agencies.length + people.length + editors.length + courses.length + comps.length
   const counts = {
+    all: total,
     agencies: agencies.length, people: people.length, editors: editors.length,
     courses: courses.length, competitions: comps.length,
   }
 
-  let list = null
-  if (tab === 'agencies') {
-    const rows = agencies.filter((a) => match(`${a.name} ${a.genres.join(' ')}`))
-    list = rows.length === 0 ? <Empty>No agencies yet.</Empty> : rows.map((a) => (
-      <DirRow key={a.id} onClick={() => openProfile('agency', a.id)}
-        title={a.name}
-        sub={[a.agencySize, a.genres.join(', ')].filter(Boolean).join(' · ')}
-        pill={a.acceptsUnsolicited === 'Yes' ? 'Open to unsolicited' : (a.acceptsUnsolicited || 'Openness unknown')}
-        pillOpen={a.acceptsUnsolicited === 'Yes'} />
-    ))
-  } else if (tab === 'people') {
-    const rows = people.filter((p) => match(`${p.firstName} ${p.lastName} ${p.agency}`))
-    list = rows.length === 0 ? <Empty>No people yet.</Empty> : rows.map((p) => (
-      <DirRow key={p.id} onClick={() => openProfile('person', p.id)}
-        title={<>{p.firstName} {p.lastName}<span className="text-dim font-normal"> · {p.agency}</span></>}
-        sub={[p.role, p.genres.join(', ')].filter(Boolean).join(' · ')}
-        pill={p.acceptsUnsolicited === 'Yes' ? 'Open to unsolicited' : (p.acceptsUnsolicited || 'Openness unknown')}
-        pillOpen={p.acceptsUnsolicited === 'Yes'} />
-    ))
-  } else if (tab === 'editors') {
-    const rows = editors.filter((e) => match(`${e.name} ${e.company} ${e.genres.join(' ')}`))
-    list = rows.length === 0 ? <Empty>No editors yet.</Empty> : rows.map((e) => (
-      <DirRow key={e.id} onClick={() => openProfile('editor', e.id)}
-        title={<>{e.name}{e.company && <span className="text-dim font-normal"> · {e.company}</span>}</>}
-        sub={[e.genres.join(', '), e.turnaround].filter(Boolean).join(' · ')} />
-    ))
-  } else if (tab === 'courses') {
-    const rows = courses.filter((c) => match(`${c.courseName} ${c.provider} ${c.format}`))
-    list = rows.length === 0 ? <Empty>No courses yet.</Empty> : rows.map((c) => (
-      <DirRow key={c.id} onClick={() => openProfile('course', c.id)}
-        title={<>{c.courseName || c.provider}{c.provider && c.courseName && <span className="text-dim font-normal"> · {c.provider}</span>}</>}
-        sub={[c.format, c.duration, c.cost].filter(Boolean).join(' · ')} />
-    ))
-  } else if (tab === 'competitions') {
-    const rows = [...comps].sort((a, b) => String(a.deadline).localeCompare(String(b.deadline)))
-      .filter((c) => match(`${c.name} ${c.genres.join(' ')}`))
-    list = rows.length === 0 ? <Empty>No competitions yet.</Empty> : rows.map((c) => (
-      <DirRow key={c.id} onClick={() => openProfile('competition', c.id)}
-        title={c.name}
-        sub={[c.deadline && `Deadline ${c.deadline}`, c.fee && `Entry ${c.fee}`].filter(Boolean).join(' · ')}
-        pill={`${c.credibility} credibility`}
-        pillOpen={c.credibility === 'High'} />
-    ))
-  }
+  // Row renderers — shared by the single-type views and the grouped "All" view.
+  const agencyRow = (a) => (
+    <DirRow key={a.id} onClick={() => openProfile('agency', a.id)}
+      title={a.name}
+      sub={[a.agencySize, a.genres.join(', ')].filter(Boolean).join(' · ')}
+      pill={a.acceptsUnsolicited === 'Yes' ? 'Open to unsolicited' : (a.acceptsUnsolicited || 'Openness unknown')}
+      pillOpen={a.acceptsUnsolicited === 'Yes'} />
+  )
+  const personRow = (p) => (
+    <DirRow key={p.id} onClick={() => openProfile('person', p.id)}
+      title={<>{p.firstName} {p.lastName}<span className="text-dim font-normal"> · {p.agency}</span></>}
+      sub={[p.role, p.genres.join(', ')].filter(Boolean).join(' · ')}
+      pill={p.acceptsUnsolicited === 'Yes' ? 'Open to unsolicited' : (p.acceptsUnsolicited || 'Openness unknown')}
+      pillOpen={p.acceptsUnsolicited === 'Yes'} />
+  )
+  const editorRow = (e) => (
+    <DirRow key={e.id} onClick={() => openProfile('editor', e.id)}
+      title={<>{e.name}{e.company && <span className="text-dim font-normal"> · {e.company}</span>}</>}
+      sub={[e.genres.join(', '), e.turnaround].filter(Boolean).join(' · ')} />
+  )
+  const courseRow = (c) => (
+    <DirRow key={c.id} onClick={() => openProfile('course', c.id)}
+      title={<>{c.courseName || c.provider}{c.provider && c.courseName && <span className="text-dim font-normal"> · {c.provider}</span>}</>}
+      sub={[c.format, c.duration, c.cost].filter(Boolean).join(' · ')} />
+  )
+  const compRow = (c) => (
+    <DirRow key={c.id} onClick={() => openProfile('competition', c.id)}
+      title={c.name}
+      sub={[c.deadline && `Deadline ${c.deadline}`, c.fee && `Entry ${c.fee}`].filter(Boolean).join(' · ')}
+      pill={`${c.credibility} credibility`}
+      pillOpen={c.credibility === 'High'} />
+  )
 
-  const total = agencies.length + people.length + editors.length + courses.length + comps.length
+  // Filtered matches per type. Search spans names — including the combined
+  // "first last" full name — the parent agency, and each type's key fields.
+  const fAgencies = agencies.filter((a) => match(`${a.name} ${a.genres.join(' ')}`))
+  const fPeople = people.filter((p) => match(`${p.firstName} ${p.lastName} ${p.agency} ${p.role}`))
+  const fEditors = editors.filter((e) => match(`${e.name} ${e.company} ${e.genres.join(' ')}`))
+  const fCourses = courses.filter((c) => match(`${c.courseName} ${c.provider} ${c.format}`))
+  const fComps = [...comps].sort((a, b) => String(a.deadline).localeCompare(String(b.deadline)))
+    .filter((c) => match(`${c.name} ${c.genres.join(' ')}`))
+
+  let list = null
+  if (tab === 'all') {
+    const groups = [
+      ['Agencies', 'agency', fAgencies.map(agencyRow)],
+      ['People', 'person', fPeople.map(personRow)],
+      ['Editors', 'editor', fEditors.map(editorRow)],
+      ['Courses', 'course', fCourses.map(courseRow)],
+      ['Competitions', 'competition', fComps.map(compRow)],
+    ].filter(([, , rows]) => rows.length > 0)
+    list = groups.length === 0
+      ? <Empty>{s ? `Nothing matches "${q.trim()}" across the directory.` : 'No listings yet.'}</Empty>
+      : groups.map(([label, key, rows]) => (
+          <div key={key} className="space-y-3">
+            <div className="flex items-baseline gap-2 pt-2">
+              <span className="text-accentHi text-xs uppercase tracking-wider">{label}</span>
+              <span className="text-dim/70 text-xs">{rows.length}</span>
+            </div>
+            {rows}
+          </div>
+        ))
+  } else if (tab === 'agencies') {
+    list = fAgencies.length === 0 ? <Empty>No agencies yet.</Empty> : fAgencies.map(agencyRow)
+  } else if (tab === 'people') {
+    list = fPeople.length === 0 ? <Empty>No people yet.</Empty> : fPeople.map(personRow)
+  } else if (tab === 'editors') {
+    list = fEditors.length === 0 ? <Empty>No editors yet.</Empty> : fEditors.map(editorRow)
+  } else if (tab === 'courses') {
+    list = fCourses.length === 0 ? <Empty>No courses yet.</Empty> : fCourses.map(courseRow)
+  } else if (tab === 'competitions') {
+    list = fComps.length === 0 ? <Empty>No competitions yet.</Empty> : fComps.map(compRow)
+  }
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-10">
@@ -304,7 +334,7 @@ function Directory({ agencies, people, editors, courses, comps, openProfile }) {
       <input
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        placeholder="Search within this view"
+        placeholder={tab === 'all' ? 'Search everyone and everything — names, agencies, editors, courses…' : 'Search within this view'}
         className="w-full px-4 py-2.5 bg-panel text-body rounded-lg border border-edge focus:border-accent outline-none placeholder:text-dim/60 mb-6"
       />
 
